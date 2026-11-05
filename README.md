@@ -36,7 +36,7 @@ python3 -m pianostudio render song.mid --title "Clair de Lune" --composer "Debus
 python3 -m pianostudio render song.mid --frames 300:390        # quick partial render
 python3 -m pianostudio batch my_midis/ --preset presets/channel_default.json --out output/
 python3 -m pianostudio doctor                                 # dependency / GPU check
-python3 -m pytest                                             # automated QA (31 tests)
+python3 -m pytest                                             # automated QA (33 tests)
 ```
 
 Each song's output goes to `output/<slug>/`:
@@ -124,7 +124,7 @@ Point it at a folder of MIDI files. Optional per-song settings go in `song.json`
 For each song it parses, fingers, animates and validates, then **renders only if validation passes**. Songs that need fingering review are **paused** with a `STATUS.txt` and their report, not exported. The channel preset applies to every song. The run writes `batch_summary.md/json`. One failed song does not stop the batch.
 
 ### 11. Quality assurance
-`python3 -m pytest` runs 31 tests. They cover:
+`python3 -m pytest` runs 33 tests. They cover:
 - MIDI notes, velocities, tempo changes without drift, time signatures, pedal, hand detection, chord grouping, overlap repair
 - the 88-key layout and out-of-range rejection
 - fingering: completeness, chord order, user overrides, impossible stretch, too many notes in one hand
@@ -136,6 +136,8 @@ For each song it parses, fingers, animates and validates, then **renders only if
 - audio onsets within one video frame of the visual note time
 - pedal sustain, velocity loudness, LUFS normalisation
 - a real short render with export-integrity checks
+- the JS renderer's fingertip positions matching the Python solver (< 0.001 cm)
+- batch mode pausing a song that fails validation
 
 The **debug overlay** (`--debug` or the checkbox) draws fingertip contact markers. `render.mjs --tips T` prints the renderer's own fingertip positions for comparison with Python.
 

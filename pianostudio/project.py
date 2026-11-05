@@ -149,13 +149,14 @@ def estimate_difficulty(song: Song) -> str:
     return "Advanced"
 
 
-def visible_range(song: Song, mode: str = "auto") -> tuple[int, int]:
+def visible_range(song: Song, mode: str = "auto", portrait: bool = False) -> tuple[int, int]:
     if mode == "full" or not song.notes:
         return G.LOWEST_MIDI, G.HIGHEST_MIDI
     lo = min(n.pitch for n in song.notes)
     hi = max(n.pitch for n in song.notes)
-    lo, hi = lo - 3, hi + 3
-    while hi - lo < 40:
+    pad, min_span = (1, 24) if portrait else (3, 40)
+    lo, hi = lo - pad, hi + pad
+    while hi - lo < min_span:
         lo -= 1
         hi += 1
     lo = max(G.LOWEST_MIDI, lo)
@@ -174,7 +175,7 @@ def scene_data(p: Prepared, preview: bool = False) -> dict:
     nc = cfg["notes"]
     preset = DIFFICULTY_PRESETS.get(nc.get("difficultyPreset", ""), {})
     difficulty = cfg["difficulty"] if cfg.get("difficulty") not in (None, "", "auto") else estimate_difficulty(p.song)
-    lo, hi = visible_range(p.song, cfg.get("range", "auto"))
+    lo, hi = visible_range(p.song, cfg.get("range", "auto"), cfg["video"]["height"] > cfg["video"]["width"])
     notes = []
     for n in sorted(p.song.notes, key=lambda n: (n.start, n.pitch)):
         on, off = p.bake.press.get(n.id, (n.start, n.end))

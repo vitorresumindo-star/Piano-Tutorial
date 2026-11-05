@@ -307,8 +307,8 @@ export class Studio {
         varying vec2 vLocal; varying vec2 vSize; varying vec3 vCol; varying float vActive; varying vec2 vLab; varying float vClip; varying float vVel; varying float vTop;
         float sdRound(vec2 p, vec2 b, float r){ vec2 q=abs(p)-b+r; return length(max(q,0.0))+min(max(q.x,q.y),0.0)-r; }
         vec4 label(float cell, vec2 uv){
-          float cx=mod(cell,16.0), cy=floor(cell/16.0);
-          return texture2D(uAtlas, (vec2(cx,cy)+uv)/vec2(16.0,8.0));
+          float cx=mod(cell,16.0), cy=floor(cell/16.0);   // uv.y runs top->bottom inside the cell
+          return texture2D(uAtlas, vec2((cx+uv.x)/16.0, 1.0-(cy+uv.y)/8.0));
         }
         void main(){
           vec2 half_=vSize*0.5;
@@ -340,10 +340,12 @@ export class Studio {
             vec2 luv=vec2((vLocal.x+vSize.x*0.5)/vSize.x, (vLocal.y-0.12)/ (vSize.x));
             if(uShowFinger>0.5 && vLab.x>0.5 && luv.y>=0.0 && luv.y<=1.0){
               vec4 L=label(vLab.x,vec2(luv.x,1.0-luv.y));
-              col=mix(col,vec3(1.0),L.a*0.95); a=max(a,L.a);
+              vec3 ink=uStyle>1.5?vec3(1.0):vec3(0.05,0.05,0.07);
+              col=mix(col,ink,L.a*0.92); a=max(a,L.a);
             } else if(uShowName>0.5 && luv.y>=0.0 && luv.y<=1.0){
               vec4 L=label(vLab.y,vec2(luv.x,1.0-luv.y));
-              col=mix(col,vec3(1.0),L.a*0.9); a=max(a,L.a);
+              vec3 ink=uStyle>1.5?vec3(1.0):vec3(0.05,0.05,0.07);
+              col=mix(col,ink,L.a*0.9); a=max(a,L.a);
             }
           }
           if(a<0.003) discard;
@@ -425,10 +427,10 @@ export class Studio {
     const draw = (idx, text, size) => {
       const cx = (idx % 16) * cell + cell / 2, cy = Math.floor(idx / 16) * cell + cell / 2;
       ctx.font = `600 ${size}px Inter, sans-serif`;
-      ctx.shadowColor = 'rgba(0,0,0,0.55)'; ctx.shadowBlur = 6;
+      ctx.shadowBlur = 0;
       ctx.fillText(text, cx, cy + 2);
     };
-    for (let f = 1; f <= 5; f++) draw(f, String(f), 66);
+    for (let f = 1; f <= 5; f++) draw(f, String(f), 78);
     for (const k of this.geo.keys) draw(8 + (k.midi - 21), k.name.replace(/\d+$/, ''), k.name.length > 2 ? 40 : 52);
     const tex = new THREE.CanvasTexture(cv);
     tex.colorSpace = THREE.NoColorSpace;
@@ -613,7 +615,7 @@ export class Studio {
     }
     // lens shift: put the keyboard in the lower part of the frame (keeps the
     // geometry perspective-correct rather than tilting the camera further)
-    const keyScreenY = portrait ? (this.opts.shortsKeyY ?? 0.70) : (this.opts.keyY ?? 0.64);
+    const keyScreenY = portrait ? (this.opts.shortsKeyY ?? 0.72) : (this.opts.keyY ?? 0.64);
     const shift = 1 - 2 * keyScreenY;   // desired NDC y of the target
     if (!this.opts.cameraOverride) cam.projectionMatrix.elements[9] = -shift;
     cam.projectionMatrixInverse.copy(cam.projectionMatrix).invert();

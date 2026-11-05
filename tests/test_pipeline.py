@@ -382,3 +382,38 @@ def test_short_render_and_integrity(tmp_path):
     integ = res["integrity"]
     assert integ["passed"], integ
     assert integ["frames"] == 12
+
+
+def test_batch_pauses_songs_that_fail_validation(tmp_path):
+    """A blocked song must not be rendered; the batch keeps going and reports it."""
+    from pianostudio.batch import run_batch
+    src = tmp_path / "in"
+    src.mkdir()
+    shutil.copy(MIDI / "single_track_test.mid", src / "bad.mid")
+    s = run_batch(src, tmp_path / "out", {})
+    assert s["counts"]["rendered"] == 0 and s["counts"]["blocked"] == 1
+    assert (tmp_path / "out" / "bad" / "STATUS.txt").exists()
+    assert (tmp_path / "out" / "bad" / "validation.md").exists()
+    assert not list((tmp_path / "out").rglob("*.mp4"))
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="renderer toolchain missing")
+def test_renderer_fk_matches_python(tmp_path):
+    """The JS renderer must place fingertips exactly where the Python solver says."""
+    from pianostudio.animation import fk_fingertips
+    from pianostudio.project import export_scene
+    p = prepare({"midi": str(MIDI / "minuet_in_g.mid"), "title": "fk", "video": {"preset": "preview"}})
+    export_scene(p, tmp_path)
+    T = 9.2
+    seg = p.program.segments[1]
+    s = seg.songStart + (T - seg.start)
+    b = p.bake
+    fi = (s - b.t0) * b.rate
+    i0, w = int(fi), fi - int(fi)
+    out = subprocess.run(["node", str(ROOT / "renderer" / "render.mjs"), "--job", str(tmp_path), "--tips", str(T),
+                          "--w", "320", "--h", "180"], capture_output=True, text=True,
+                         env={**__import__("os").environ, "NODE_PATH": "/opt/node22/lib/node_modules"})
+    tips = next(json.loads(l)["tips"] for l in out.stdout.splitlines() if '"tips"' in l)
+    for h in ("R", "L"):
+        pose = (b.hands[h].pose[i0] * (1 - w) + b.hands[h].pose[i0 + 1] * w).astype(float)[None]
+        assert np.abs(np.array(tips[h]) - fk_fingertips(pose, h)[0]).max() < 1e-3
