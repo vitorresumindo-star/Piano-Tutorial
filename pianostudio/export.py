@@ -214,7 +214,7 @@ def _compose_thumbnail(still: Path, out: Path, cfg: dict, data: dict):
     grad = Image.new("L", (1280, 720), 0)
     gd = ImageDraw.Draw(grad)
     for x in range(1280):
-        a = int(max(0, 1 - x / 760) ** 1.4 * 235)
+        a = int(min(1.0, max(0.0, 1.25 - x / 820)) ** 1.2 * 238)
         gd.line([(x, 0), (x, 720)], fill=a)
     shade = Image.new("RGB", (1280, 720), (246, 242, 234) if light else (6, 7, 10))
     img = Image.composite(shade, img, grad)
