@@ -1,0 +1,30 @@
+{
+  "name": "piano-studio",
+  "version": "1.0.0",
+  "description": "Renderer dependencies for Piano Studio",
+  "directories": {
+    "example": "examples",
+    "test": "tests"
+  },
+  "scripts": {
+    "render": "node renderer/render.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vitorresumindo-star/Piano-Tutorial.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/vitorresumindo-star/Piano-Tutorial/issues"
+  },
+  "homepage": "https://github.com/vitorresumindo-star/Piano-Tutorial#readme",
+  "dependencies": {
+    "@fontsource/cormorant-garamond": "^5.1.0",
+    "@fontsource/inter": "^5.1.0",
+    "three": "0.170.0",
+    "playwright": "1.63.0"
+  },
+  "private": true
+}

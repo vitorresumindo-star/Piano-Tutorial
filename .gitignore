@@ -1,0 +1,9 @@
+node_modules/
+assets/downloads/
+assets/samples/
+__pycache__/
+*.pyc
+.pytest_cache/
+workspace/
+output/
+*.log

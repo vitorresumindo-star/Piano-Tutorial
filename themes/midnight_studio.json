@@ -1,0 +1,86 @@
+{
+  "id": "midnight_studio",
+  "name": "Midnight Studio",
+  "description": "Black grand-piano aesthetic, deep charcoal, soft blue and warm amber notes.",
+  "background": {
+    "top": "#050608",
+    "bottom": "#14161b",
+    "floor": "#07080a",
+    "haze": "#1b2230",
+    "hazeOpacity": 0.35
+  },
+  "piano": {
+    "body": "lacquer",
+    "bodyColor": "#060607",
+    "whiteKey": "#f3efe6",
+    "blackKey": "#0a0a0c",
+    "felt": "#5a0d18",
+    "keyRoughness": 0.32
+  },
+  "notes": {
+    "R": "#ffb25c",
+    "L": "#5fa8ff",
+    "glow": 1.0,
+    "opacity": 0.95,
+    "style": "soft",
+    "radius": 0.45,
+    "pressedTint": 0.6
+  },
+  "lanes": {
+    "color": "#8fa3c7",
+    "opacity": 0.07,
+    "octaveOpacity": 0.16
+  },
+  "lighting": {
+    "exposure": 1.05,
+    "env": 0.44,
+    "ambient": "#30384a",
+    "ambientIntensity": 0.49,
+    "key": {
+      "color": "#fff1dc",
+      "intensity": 2.09,
+      "pos": [
+        -60,
+        140,
+        -40
+      ]
+    },
+    "fill": {
+      "color": "#9db8ff",
+      "intensity": 0.44,
+      "pos": [
+        80,
+        60,
+        120
+      ]
+    },
+    "rim": {
+      "color": "#ffd2a0",
+      "intensity": 0.9,
+      "pos": [
+        0,
+        40,
+        -160
+      ]
+    }
+  },
+  "ui": {
+    "fontTitle": "Cormorant Garamond",
+    "fontBody": "Inter",
+    "text": "#f4efe6",
+    "muted": "#9aa3b2",
+    "accent": "#ffb25c",
+    "progress": "#ffffff"
+  },
+  "post": {
+    "bloomStrength": 0.75,
+    "bloomRadius": 0.55,
+    "bloomThreshold": 1.17,
+    "vignette": 0.42,
+    "grain": 0.035
+  },
+  "camera": {
+    "tilt": 40,
+    "fov": 30
+  }
+}

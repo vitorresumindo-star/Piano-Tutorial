@@ -1,0 +1,86 @@
+{
+  "id": "ivory_minimal",
+  "name": "Ivory Minimal",
+  "description": "White and ivory palette, gentle shadows, refined editorial look.",
+  "background": {
+    "top": "#f6f2ea",
+    "bottom": "#e9e3d7",
+    "floor": "#e4ddcf",
+    "haze": "#ffffff",
+    "hazeOpacity": 0.0
+  },
+  "piano": {
+    "body": "matte",
+    "bodyColor": "#ece6da",
+    "whiteKey": "#fbf8f2",
+    "blackKey": "#1d1c1b",
+    "felt": "#a5534a",
+    "keyRoughness": 0.38
+  },
+  "notes": {
+    "R": "#d9822b",
+    "L": "#3b6ea8",
+    "glow": 0.25,
+    "opacity": 0.92,
+    "style": "flat",
+    "radius": 0.5,
+    "pressedTint": 0.55
+  },
+  "lanes": {
+    "color": "#6f6553",
+    "opacity": 0.06,
+    "octaveOpacity": 0.14
+  },
+  "lighting": {
+    "exposure": 1.0,
+    "env": 0.72,
+    "ambient": "#ffffff",
+    "ambientIntensity": 0.98,
+    "key": {
+      "color": "#ffffff",
+      "intensity": 1.69,
+      "pos": [
+        -50,
+        160,
+        -20
+      ]
+    },
+    "fill": {
+      "color": "#fff6e8",
+      "intensity": 0.56,
+      "pos": [
+        70,
+        80,
+        140
+      ]
+    },
+    "rim": {
+      "color": "#ffffff",
+      "intensity": 0.3,
+      "pos": [
+        0,
+        40,
+        -160
+      ]
+    }
+  },
+  "ui": {
+    "fontTitle": "Cormorant Garamond",
+    "fontBody": "Inter",
+    "text": "#26231f",
+    "muted": "#7d766b",
+    "accent": "#d9822b",
+    "progress": "#26231f"
+  },
+  "post": {
+    "bloomStrength": 0.12,
+    "bloomRadius": 0.4,
+    "bloomThreshold": 1.37,
+    "vignette": 0.12,
+    "grain": 0.015
+  },
+  "camera": {
+    "tilt": 40,
+    "fov": 30
+  }
+}

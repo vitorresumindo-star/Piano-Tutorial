@@ -1,0 +1,79 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Piano Studio Renderer</title>
+<style>html,body{margin:0;background:#000;overflow:hidden}canvas{display:block}</style>
+<script type="importmap">
+{ "imports": { "three": "/vendor/three/build/three.module.js", "three/addons/": "/vendor/three/examples/jsm/" } }
+</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script type="module">
+import { Studio } from './js/studio.js';
+const qs = new URLSearchParams(location.search);
+const job = qs.get('job') || '/job/';
+const W = +qs.get('w'), H = +qs.get('h');
+window.__log = [];
+async function init() {
+  const perf = await (await fetch(job + 'perf.json')).json();
+  const bake = await (await fetch(job + 'bake.bin')).arrayBuffer();
+  const w = W || perf.program.width, h = H || perf.program.height;
+  const canvas = document.getElementById('c');
+  canvas.width = w; canvas.height = h;
+  perf.options.fontBase = '/web/fonts/';
+  const studio = new Studio(canvas, { width: w, height: h });
+  await studio.load(perf, bake);
+  const gl = studio.renderer.getContext();
+  const buf = new Uint8Array(w * h * 4);
+  window.__studio = {
+    info: () => { const d = gl.getExtension('WEBGL_debug_renderer_info');
+      return { renderer: d ? gl.getParameter(d.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER), w, h,
+               frames: perf.program.frames, fps: perf.program.fps, duration: perf.program.duration }; },
+    // Render video time T and POST raw RGBA (bottom-up) to the local server.
+    frame: async (T, idx) => {
+      studio.render(T);
+      gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+      const r = await fetch('/frame?i=' + idx, { method: 'POST', body: buf });
+      if (!r.ok) throw new Error('frame upload failed');
+      return idx;
+    },
+    profile: (T, cfg) => {
+      const r = studio.renderer, out = {};
+      const time = (label, fn, n = 3) => { fn(); gl.finish(); const t = performance.now(); for (let i = 0; i < n; i++) { fn(); gl.readPixels(0,0,1,1,gl.RGBA,gl.UNSIGNED_BYTE,new Uint8Array(4)); } out[label] = (performance.now() - t) / n; };
+      time('full', () => studio.render(T));
+      time('readback', () => gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, buf));
+      r.shadowMap.enabled = false; studio.scene.traverse(o => { if (o.material) o.material.needsUpdate = true; });
+      
+      time('noShadow', () => studio.render(T));
+      r.shadowMap.enabled = true; studio.scene.traverse(o => { if (o.material) o.material.needsUpdate = true; });
+      const hv = Object.values(studio.hands); hv.forEach(h => h.root.visible = false);
+      time('noHands', () => studio.render(T)); hv.forEach(h => h.root.visible = true);
+      time('sceneOnlyNoPost', () => r.render(studio.scene, studio.camera));
+      // cheaper materials
+      const THREE_ = studio.scene.constructor;
+      studio.scene.traverse(o => { const m = o.material; if (m && m.isMeshPhysicalMaterial) { m.clearcoat = 0; m.sheen = 0; m.specularIntensity = 1; m.needsUpdate = true; } });
+      time('noClearcoatSheen', () => studio.render(T));
+      time('sceneOnlyNoPost2', () => r.render(studio.scene, studio.camera));
+      studio.scene.environment = null; studio.scene.traverse(o => { if (o.material) o.material.needsUpdate = true; });
+      time('noEnv', () => r.render(studio.scene, studio.camera));
+      studio.lanePanel.visible = false; time('noLane', () => r.render(studio.scene, studio.camera));
+      studio.noteMesh.visible = false; studio.sparks.visible=false; studio.hitMesh.visible=false; time('noNotes', () => r.render(studio.scene, studio.camera));
+      studio.pianoGroup.visible = false; time('noPiano', () => r.render(studio.scene, studio.camera));
+      return out;
+    },
+    still: (T) => { studio.render(T); return canvas.toDataURL('image/png'); },
+    debugTips: (T) => {
+      studio.opts.debug = true; studio.debugGroup.visible = true; studio.render(T);
+      const out = {};
+      for (const h of ['R', 'L']) out[h] = studio.debugTips[h].map((m) => [m.position.x, m.position.y, m.position.z]);
+      return out;
+    },
+  };
+  window.__studioReady = true;
+}
+init().catch((e) => { window.__studioError = String(e && e.stack || e); console.error(e); });
+</script>
+</body>
+</html>

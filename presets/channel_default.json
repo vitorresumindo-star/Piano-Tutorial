@@ -1,0 +1,11 @@
+{
+  "theme": "midnight_studio",
+  "kicker": "Piano Tutorial",
+  "hands": {"skinTone": "light", "sleeve": true, "sleeveColor": "#101014"},
+  "video": {"preset": "1080p30"},
+  "notes": {"travelTime": 3.0, "glow": 1.0, "showNoteNames": false, "showFingers": false, "difficultyPreset": "intermediate"},
+  "structure": {"intro": true, "practice": true, "practiceRate": 0.6, "practiceBars": 8, "outro": true, "progressBar": true},
+  "audio": {"reverb": 0.28, "targetLufs": -14.0},
+  "branding": {"channel": "Piano Studio", "tagline": "Beautiful piano tutorials, note by note", "watermark": "PIANO STUDIO"},
+  "strict": true
+}

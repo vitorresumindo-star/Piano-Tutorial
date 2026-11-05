@@ -1,0 +1,87 @@
+{
+  "id": "modern_neon",
+  "name": "Modern Neon",
+  "description": "Black keyboard environment, luminous teal and purple trails, futuristic minimalism.",
+  "background": {
+    "top": "#020205",
+    "bottom": "#07060f",
+    "floor": "#030308",
+    "haze": "#1a0f3a",
+    "hazeOpacity": 0.4
+  },
+  "piano": {
+    "body": "lacquer",
+    "bodyColor": "#040406",
+    "whiteKey": "#1a1b22",
+    "blackKey": "#050507",
+    "felt": "#3b1a6e",
+    "keyRoughness": 0.25,
+    "keyEdge": "#6cf5e8"
+  },
+  "notes": {
+    "R": "#3ff2d9",
+    "L": "#a35cff",
+    "glow": 1.6,
+    "opacity": 0.9,
+    "style": "neon",
+    "radius": 0.35,
+    "pressedTint": 0.85
+  },
+  "lanes": {
+    "color": "#7a6cff",
+    "opacity": 0.08,
+    "octaveOpacity": 0.2
+  },
+  "lighting": {
+    "exposure": 1.0,
+    "env": 0.28,
+    "ambient": "#1c1838",
+    "ambientIntensity": 0.56,
+    "key": {
+      "color": "#d8e8ff",
+      "intensity": 1.53,
+      "pos": [
+        -60,
+        140,
+        -40
+      ]
+    },
+    "fill": {
+      "color": "#7a5cff",
+      "intensity": 0.48,
+      "pos": [
+        80,
+        60,
+        120
+      ]
+    },
+    "rim": {
+      "color": "#3ff2d9",
+      "intensity": 1.0,
+      "pos": [
+        0,
+        40,
+        -160
+      ]
+    }
+  },
+  "ui": {
+    "fontTitle": "Inter",
+    "fontBody": "Inter",
+    "text": "#eef2ff",
+    "muted": "#8a8fb0",
+    "accent": "#3ff2d9",
+    "progress": "#3ff2d9"
+  },
+  "post": {
+    "bloomStrength": 1.15,
+    "bloomRadius": 0.65,
+    "bloomThreshold": 1.05,
+    "vignette": 0.45,
+    "grain": 0.03
+  },
+  "camera": {
+    "tilt": 40,
+    "fov": 30
+  }
+}

@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Piano Studio</title>
+<link rel="stylesheet" href="/web/app.css">
+<script type="importmap">
+{ "imports": { "three": "/vendor/three/build/three.module.js", "three/addons/": "/vendor/three/examples/jsm/" } }
+</script>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="logo">◐</span> Piano Studio</div>
+  <div class="project-title" id="projTitle">No project</div>
+  <div class="actions">
+    <button id="btnNew" class="ghost">New</button>
+    <button id="btnBatch" class="ghost">Batch</button>
+    <button id="btnPreset" class="ghost">Save preset</button>
+    <button id="btnAnalyze" class="ghost">Update preview</button>
+    <button id="btnRender" class="primary">Generate video</button>
+  </div>
+</header>
+
+<main class="layout">
+  <aside class="panel" id="panel">
+    <section>
+      <h3>Song</h3>
+      <label>Title <input id="title" type="text"></label>
+      <label>Composer <input id="composer" type="text"></label>
+      <label>Difficulty
+        <select id="difficulty"><option value="auto">Automatic</option><option>Beginner</option><option>Intermediate</option><option>Advanced</option></select>
+      </label>
+      <label>Intro line <input id="introText" type="text" placeholder="Optional short instruction"></label>
+    </section>
+    <section>
+      <h3>Look</h3>
+      <div class="themes" id="themes"></div>
+      <div class="row">
+        <label>Right hand <input id="colR" type="color"></label>
+        <label>Left hand <input id="colL" type="color"></label>
+        <button class="tiny ghost" id="btnThemeColors" title="Use theme colours">↺</button>
+      </div>
+      <label>Keyboard range <select id="range"><option value="auto">Fit to song</option><option value="full">Full 88 keys</option></select></label>
+    </section>
+    <section>
+      <h3>Hands</h3>
+      <div class="swatches" id="skin"></div>
+      <div class="row">
+        <label class="check"><input id="sleeve" type="checkbox"> Sleeves</label>
+        <label>Sleeve <input id="sleeveColor" type="color"></label>
+      </div>
+    </section>
+    <section>
+      <h3>Falling notes</h3>
+      <label>Preset
+        <select id="diffPreset"><option value="beginner">Beginner (slow, labels)</option><option value="intermediate">Intermediate</option><option value="advanced">Advanced (fast)</option></select>
+      </label>
+      <label>Travel time <span class="val" id="travelVal"></span><input id="travel" type="range" min="1.2" max="6" step="0.1"></label>
+      <label>Glow <span class="val" id="glowVal"></span><input id="glow" type="range" min="0" max="2" step="0.05"></label>
+      <label class="check"><input id="showFingers" type="checkbox"> Finger numbers</label>
+      <label class="check"><input id="showNames" type="checkbox"> Note names</label>
+    </section>
+    <section>
+      <h3>Video structure</h3>
+      <label class="check"><input id="intro" type="checkbox"> Animated title intro</label>
+      <label class="check"><input id="practice" type="checkbox"> Practice section (slow, finger numbers)</label>
+      <div class="row">
+        <label>Speed <select id="practiceRate"><option value="0.5">50%</option><option value="0.6">60%</option><option value="0.75">75%</option></select></label>
+        <label>Bars <input id="practiceBars" type="number" min="2" max="32"></label>
+        <label>Repeats <input id="practiceRepeats" type="number" min="1" max="4"></label>
+      </div>
+      <label class="check"><input id="progressBar" type="checkbox"> Progress bar</label>
+      <label class="check"><input id="outro" type="checkbox"> Outro</label>
+      <label class="check"><input id="metronome" type="checkbox"> Metronome click</label>
+      <label>Reverb <span class="val" id="reverbVal"></span><input id="reverb" type="range" min="0" max="0.8" step="0.02"></label>
+    </section>
+    <section>
+      <h3>Channel branding</h3>
+      <label>Channel name <input id="channel" type="text"></label>
+      <label>Tagline <input id="tagline" type="text"></label>
+      <label>Watermark <input id="watermark" type="text"></label>
+    </section>
+    <section>
+      <h3>Export</h3>
+      <label>Format <select id="videoPreset"></select></label>
+      <label class="check"><input id="strict" type="checkbox"> Pause export when fingering needs review</label>
+      <label class="check"><input id="debug" type="checkbox"> Debug overlay (contact markers)</label>
+    </section>
+  </aside>
+
+  <section class="stage">
+    <div class="viewport" id="viewport">
+      <div class="placeholder" id="placeholder">
+        <h1>Create a piano tutorial</h1>
+        <p>Upload a MIDI file you have the rights to use, or start from an example.</p>
+        <div class="row center">
+          <label class="primary file">Upload MIDI<input type="file" id="file" accept=".mid,.midi" hidden></label>
+          <select id="example"></select>
+          <button id="btnExample" class="ghost">Open example</button>
+        </div>
+        <div class="row center"><label>Channel preset <select id="newPreset"><option value="">None</option></select></label></div>
+      </div>
+      <div class="busy hidden" id="busy"><div class="spinner"></div><span id="busyText">Preparing…</span></div>
+    </div>
+    <div class="transport">
+      <button id="btnPlay" class="round" title="Play / pause (space)">▶</button>
+      <span id="tc" class="tc">0:00.0</span>
+      <input id="scrub" type="range" min="0" max="1" step="0.001" value="0">
+      <span id="dur" class="tc">0:00</span>
+      <select id="aspect" title="Preview aspect"><option value="16:9">16:9</option><option value="9:16">9:16 Shorts</option></select>
+    </div>
+    <div class="dock">
+      <div class="tabs">
+        <button data-tab="fingering" class="active">Fingering editor</button>
+        <button data-tab="validation">Validation <span id="statusPill" class="pill">—</span></button>
+        <button data-tab="jobs">Renders</button>
+      </div>
+      <div class="tab" id="tab-fingering">
+        <div class="roll-wrap"><canvas id="roll"></canvas></div>
+        <div class="note-inspector" id="inspector">
+          <div class="muted">Click a note to edit its hand and finger. Shortcuts: <kbd>1</kbd>–<kbd>5</kbd> finger, <kbd>L</kbd>/<kbd>R</kbd> hand, <kbd>←</kbd>/<kbd>→</kbd> next note.</div>
+        </div>
+      </div>
+      <div class="tab hidden" id="tab-validation"><div id="report" class="report"></div></div>
+      <div class="tab hidden" id="tab-jobs"><div id="jobs" class="jobs"></div></div>
+    </div>
+  </section>
+</main>
+
+<dialog id="batchDlg">
+  <form method="dialog">
+    <h3>Batch production</h3>
+    <p class="muted">Every MIDI in the folder is analysed and validated. Songs that pass are rendered with the chosen preset; songs needing fingering review are paused. Optional per-song settings: <code>song.json</code> next to <code>song.mid</code>.</p>
+    <label>Folder (on the server) <input id="batchFolder" type="text" value="examples/midi"></label>
+    <label>Preset <select id="batchPreset"><option value="">None</option></select></label>
+    <label class="check"><input id="batchDry" type="checkbox" checked> Dry run (validate only)</label>
+    <menu><button value="cancel" class="ghost">Cancel</button><button id="batchGo" value="ok" class="primary">Start</button></menu>
+  </form>
+</dialog>
+<dialog id="presetDlg">
+  <form method="dialog">
+    <h3>Save channel preset</h3>
+    <p class="muted">Stores theme, colours, hands, notes, structure, audio, branding and export settings.</p>
+    <label>Name <input id="presetName" type="text" value="my_channel"></label>
+    <menu><button value="cancel" class="ghost">Cancel</button><button id="presetGo" value="ok" class="primary">Save</button></menu>
+  </form>
+</dialog>
+<div id="toast" class="toast hidden"></div>
+<script type="module" src="/web/js/app.js"></script>
+</body>
+</html>

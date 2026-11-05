@@ -1,0 +1,86 @@
+{
+  "id": "warm_concert_hall",
+  "name": "Warm Concert Hall",
+  "description": "Wooden piano details, warm cinematic light, intimate classical atmosphere.",
+  "background": {
+    "top": "#0d0705",
+    "bottom": "#2a170d",
+    "floor": "#120a06",
+    "haze": "#5a3418",
+    "hazeOpacity": 0.45
+  },
+  "piano": {
+    "body": "wood",
+    "bodyColor": "#4a2412",
+    "whiteKey": "#f1e6cf",
+    "blackKey": "#120b08",
+    "felt": "#6d1420",
+    "keyRoughness": 0.3
+  },
+  "notes": {
+    "R": "#ffc46b",
+    "L": "#e0805a",
+    "glow": 0.85,
+    "opacity": 0.93,
+    "style": "soft",
+    "radius": 0.45,
+    "pressedTint": 0.55
+  },
+  "lanes": {
+    "color": "#e8b98a",
+    "opacity": 0.06,
+    "octaveOpacity": 0.14
+  },
+  "lighting": {
+    "exposure": 1.1,
+    "env": 0.36,
+    "ambient": "#4a3020",
+    "ambientIntensity": 0.56,
+    "key": {
+      "color": "#ffd9a8",
+      "intensity": 2.26,
+      "pos": [
+        -70,
+        130,
+        -30
+      ]
+    },
+    "fill": {
+      "color": "#ffb37a",
+      "intensity": 0.36,
+      "pos": [
+        90,
+        50,
+        120
+      ]
+    },
+    "rim": {
+      "color": "#ffcf8f",
+      "intensity": 1.1,
+      "pos": [
+        20,
+        40,
+        -160
+      ]
+    }
+  },
+  "ui": {
+    "fontTitle": "Cormorant Garamond",
+    "fontBody": "Inter",
+    "text": "#f6e7cf",
+    "muted": "#c2a585",
+    "accent": "#ffc46b",
+    "progress": "#ffd9a8"
+  },
+  "post": {
+    "bloomStrength": 0.65,
+    "bloomRadius": 0.6,
+    "bloomThreshold": 1.15,
+    "vignette": 0.5,
+    "grain": 0.04
+  },
+  "camera": {
+    "tilt": 40,
+    "fov": 30
+  }
+}
