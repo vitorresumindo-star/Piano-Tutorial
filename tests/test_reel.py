@@ -134,6 +134,11 @@ def test_title_reveal():
     assert np.array_equal(ov.apply(base, 0.0), base)
     out = ov.apply(base, 3.0)
     assert (out > 0.95).any() and not np.array_equal(out, base)
+    # mid-reveal: nothing (not even a shadow) appears right of the write-on edge
+    mid = ov.apply(base, 0.45)
+    a, x0, x1, _ = ov.layers[0]
+    right = slice(int(x0 + (x1 - x0) * 0.75), 540)
+    assert np.allclose(mid[:, right], base[:, right], atol=2e-3)
 
 
 def test_full_frame_composite_small():

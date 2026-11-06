@@ -218,7 +218,7 @@ def produce_reel(project: str | Path, out_dir: str | Path | None = None, workers
                         "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv",
                         "-c:a", "aac", "-b:a", "256k", "-movflags", "+faststart", str(sh)], check=True)
         result["share"] = str(sh)
-        result["check_share"] = check(sh, lay.width, lay.height, 30, int(round(n * 30 / fps_)), a_len)
+        result["check_share"] = check(sh, lay.width, lay.height, 30, math.ceil(n * 30 / fps_ - 1e-9), a_len)  # fps filter rounds up
     result["sync"] = sync_report(p)
     shutil.rmtree(tmp, ignore_errors=True)
     (out / "render_report.json").write_text(json.dumps(result, indent=2))
