@@ -36,7 +36,7 @@ python3 -m pianostudio render song.mid --title "Clair de Lune" --composer "Debus
 python3 -m pianostudio render song.mid --frames 300:390        # quick partial render
 python3 -m pianostudio batch my_midis/ --preset presets/channel_default.json --out output/
 python3 -m pianostudio doctor                                 # dependency / GPU check
-python3 -m pytest                                             # automated QA (33 tests)
+python3 -m pytest                                             # automated QA (3D + reel tests)
 ```
 
 Each song's output goes to `output/<slug>/`:
@@ -52,6 +52,87 @@ Each song's output goes to `output/<slug>/`:
 | `render.log` | renderer log |
 
 ---
+
+## Cinematic piano reels (9:16 for TikTok, Reels and Shorts)
+
+`python3 -m pianostudio reel <project folder>` makes a vertical 1080×1920 video:
+
+```
+┌──────────────────────────┐
+│  cinematic footage (38%) │  procedural scenes or your own clips, graded, with dissolves
+│  ✍ Song title            │  handwritten white titles (Dancing Script, OFL)
+│     Film title           │
+├──────────────────────────┤
+│  falling notes (white    │  colour per note name, black outlines, note labels
+│  piano roll)             │
+│ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁ │
+│  labelled keyboard  ✋ ✋  │  illustrated hands play the actual notes
+└──────────────────────────┘
+```
+
+```bash
+python3 -m pianostudio reel projects/dust_and_starlight          # the finished demo (original music + visuals)
+python3 -m pianostudio reel projects/cornfield_chase             # needs projects/cornfield_chase/cornfield_chase.mid
+python3 -m pianostudio reel projects/dust_and_starlight --stills 2,20,44   # quick PNG previews
+python3 -m pianostudio reel projects/dust_and_starlight --frames 0:300     # partial render
+```
+
+Output in `output/<name>/`: `<name>_1080x1920_60fps_HQ.mp4` (H.264 High, CRF 17, AAC 320k),
+`<name>_1080x1920_30fps.mp4` (smaller share copy), `audio.wav` and `render_report.json`.
+
+### Make a new reel (new film, new song)
+
+1. Copy a project folder, e.g. `cp -r projects/cornfield_chase projects/my_song`.
+2. Put the MIDI arrangement in the folder. Use two tracks named *Right Hand* / *Left Hand*
+   if you can. Edit `project.json`: `title`, `subtitle` (the film), `midi`.
+3. Choose the footage. Every entry in `footage.shots` is either a procedural scene
+   (`{"scene": "field", "params": {...}}`) or **your own clip**
+   (`{"clip": "footage/a.mp4", "in": 12.5, "focus": [0.5, 0.4], "zoom": [1.0, 1.06]}`).
+   Clips are cover-cropped around `focus`, so faces stay in frame. Put cuts on the music
+   with `"bar": 9` (bar of the score) or `"time": 21.5` (seconds). Shots without either
+   are spread evenly and snapped to bar lines. `"transition": "white" | "black" | "cut"`
+   changes the default dissolve.
+4. For a long arrangement, pick a section with `"excerpt": {"fromBar": 17, "toBar": 41}`.
+5. Render. Nothing else needs to change. Fingering, hand choreography, note colours,
+   keyboard range, audio and sync all come from the MIDI.
+
+| key | meaning (defaults in `pianostudio/reel/project.py`) |
+|---|---|
+| `fps`, `width`, `height` | 60, 1080, 1920 |
+| `leadIn`, `tail` | seconds of falling notes before the first note / ringing after the last |
+| `notes.fallSeconds` | how long a note takes to fall (speed) |
+| `notes.colorMode` | `pitch` (colour per note name) or `hand` (`notes.handColors`) |
+| `notes.palette` | override colours, e.g. `{"C": "#FF6B5B"}` |
+| `notes.labels`, `notes.keyLabels` | note names on the bars / keys (`all`, `c`, `none`) |
+| `hands.skin`, `hands.outline` | hand colours (hex) |
+| `titleStyle` | `y` (fraction of the footage panel), `size`, `subSize`, `font`, `subFont`, `revealAt` |
+| `footage.transition`, `grain`, `vignette` | dissolve length (s), film grain, vignette |
+| `audio.reverb`, `targetLufs` | room size, loudness (−14 LUFS, true peak ≤ −1 dBTP) |
+| `output.crf`, `shareCrf` | quality of the HQ and share files |
+
+Procedural scenes (`pianostudio/reel/scenes.py`, all original): `field` (golden-hour or
+`palette: "dusk"` cornfield; camera `dolly` / `pan` / `rise`), `truck`, `storm`, `night`,
+`launch` (`phase`: `pad` / `liftoff` / `ascent`), `orbit`, `planet`, `blackhole`.
+
+### How sync is guaranteed
+
+* Notes, keys, hands and audio use the same timeline. A falling note's bottom edge
+  reaches the keyboard at its onset. The key is fully down in the first frame at or
+  after the onset, with the assigned fingertip on it.
+  `render_report.json → sync` checks this for every note (0 failures, 0 px offset for the demo).
+* Fingers release early before a leap, as pianists do, so they never teleport. Only
+  relaxed fingers make room for one another, and a key is lit only while its finger
+  holds it. `tests/test_reel.py` checks continuity (< 1 key width per frame at 60 fps),
+  that no key is held by two fingers, and that every lit key has a fingertip on it.
+* Every export is probed: H.264, yuv420p, BT.709, resolution, fps, exact frame count, and
+  audio length.
+
+### Licensing notes
+
+The demo **music** (`projects/dust_and_starlight/compose.py`) and all **visuals** are
+original. Piano audio uses Salamander Grand Piano (CC BY 3.0), and the font is
+Dancing Script (OFL, `assets/fonts`). Use film clips and song arrangements only if
+you have the rights. See `projects/cornfield_chase/README.md`.
 
 ## What is implemented
 
@@ -175,11 +256,14 @@ A machine with a GPU (run with `--gpu`, detected automatically) is typically 20�
 
 ```
 pianostudio/   Python package (midi_io, fingering, animation, validation, audio, program, project, export, batch, server, cli)
+pianostudio/reel/  vertical cinematic reels: layout, hands2d, pianoroll, scenes, cinema, titles, project, render
 renderer/      render.mjs: headless Chromium → FFmpeg
 web/           app UI (index.html, app.js, app.css), renderer scene (js/studio.js, hands.js, overlay.js), fonts (OFL)
 themes/        visual presets (JSON)
 presets/       channel presets (JSON)
 examples/midi  demo MIDI files + generator script
+projects/      reel projects (project.json + MIDI + optional footage)
+assets/fonts   handwritten title font (OFL)
 tests/         pytest suite
 scripts/       setup.sh
 ```

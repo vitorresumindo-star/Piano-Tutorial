@@ -3,6 +3,7 @@
   python -m pianostudio analyze song.mid               # parse + fingering + validation report
   python -m pianostudio render song.mid --title "..."  # full video
   python -m pianostudio batch midi_folder/ --preset presets/channel.json
+  python -m pianostudio reel projects/dust_and_starlight  # vertical cinematic piano reel (9:16)
   python -m pianostudio serve                          # web app on http://localhost:8765
   python -m pianostudio doctor                         # environment check
 """
@@ -87,6 +88,15 @@ def main(argv=None):
     p.add_argument("--workers", type=int)
     p.add_argument("--dry-run", action="store_true", help="only analyse + validate")
 
+    p = sub.add_parser("reel", help="render a vertical cinematic piano reel from a project folder")
+    p.add_argument("project", help="project folder or project.json")
+    p.add_argument("--out", help="output folder (default output/<name>)")
+    p.add_argument("--workers", type=int, default=4)
+    p.add_argument("--fps", type=int, help="override the project frame rate")
+    p.add_argument("--frames", help="render only a frame range a:b")
+    p.add_argument("--stills", help="comma-separated times (s): save PNG stills instead of a video")
+    p.add_argument("--no-share", action="store_true", help="skip the 30 fps share version")
+
     p = sub.add_parser("serve", help="start the web application")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8765)
@@ -124,6 +134,20 @@ def main(argv=None):
                       on_event=printer)
         print(json.dumps(s["counts"], indent=2))
         return 0
+    if a.cmd == "reel":
+        from .reel.project import MissingMidi
+        from .reel.render import produce_reel
+        try:
+            res = produce_reel(a.project, a.out, workers=a.workers,
+                               frames=tuple(int(x) for x in a.frames.split(":")) if a.frames else None,
+                               fps=a.fps, stills=[float(x) for x in a.stills.split(",")] if a.stills else None,
+                               share=not a.no_share)
+        except MissingMidi as e:
+            print(str(e))
+            return 2
+        print(json.dumps(res, indent=2))
+        ok = res.get("stills") or res.get("check_master", {}).get("ok")
+        return 0 if ok else 3
     if a.cmd == "serve":
         from .server import run
         run(a.host, a.port)

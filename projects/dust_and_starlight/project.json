@@ -1,0 +1,31 @@
+{
+  "title": "Dust & Starlight",
+  "subtitle": "an original piano piece",
+  "midi": "dust_and_starlight.mid",
+  "fps": 60,
+  "leadIn": 0.4,
+  "tail": 2.4,
+  "notes": {"fallSeconds": 2.2, "colorMode": "pitch", "labels": true, "keyLabels": "all", "spelling": "common"},
+  "titleStyle": {"y": 0.235, "size": 104, "subSize": 58},
+  "audio": {"reverb": 0.30, "reverbSeconds": 2.4, "targetLufs": -14.0, "fadeOut": 1.6},
+  "footage": {
+    "transition": 0.6,
+    "grain": 0.012,
+    "vignette": 0.32,
+    "shots": [
+      {"bar": 1,  "scene": "field", "seed": 11, "params": {"camera": "dolly", "sun_x": 0.62}},
+      {"bar": 3,  "scene": "field", "seed": 23, "params": {"camera": "pan", "sun_x": 0.40, "sun_alt": 0.05, "farm_x": 0.66}},
+      {"bar": 5,  "scene": "truck", "seed": 5},
+      {"bar": 7,  "scene": "storm", "seed": 3},
+      {"bar": 9,  "scene": "night", "seed": 4, "params": {"cy0": 0.62, "cy1": 0.47, "meteor": 0.55}},
+      {"bar": 11, "scene": "launch", "seed": 5, "params": {"phase": "pad"}},
+      {"bar": 13, "scene": "launch", "seed": 5, "params": {"phase": "liftoff"}, "transition": "white"},
+      {"bar": 15, "scene": "launch", "seed": 5, "params": {"phase": "ascent"}},
+      {"bar": 17, "scene": "orbit", "seed": 6},
+      {"bar": 19, "scene": "blackhole", "seed": 8},
+      {"bar": 21, "scene": "planet", "seed": 7},
+      {"bar": 23, "scene": "field", "seed": 31, "params": {"palette": "dusk", "camera": "rise", "sun_alt": -0.02, "farm_x": 0.7}}
+    ]
+  },
+  "output": {"name": "dust_and_starlight", "crf": 17, "shareCrf": 21, "preset": "medium"}
+}
