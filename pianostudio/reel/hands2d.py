@@ -1,46 +1,70 @@
-"""Illustrated 2D hands for the reel: choreography + drawing.
+"""Illustrated hands for the reel: articulated choreography + overhead drawing.
 
-Choreography (deterministic, from fingered notes):
-  * every note carries hand + finger (MIDI/sidecar or the beam-search solver);
-  * the palm glides between hand positions with minimum-jerk moves that finish
-    just before the chord that needs them, with a dead-band so repeated
-    figures don't make the hand wobble;
-  * each finger reaches its key before the onset, the key is fully down exactly
-    at the onset, held for the note, released, then the finger relaxes back to
-    its natural place relative to the palm (or travels straight to its next key
-    when that comes soon);
-  * free fingers are kept in order and apart; the palm is clamped so every
-    pressing finger stays within reach.
+Model (right hand; units are white-key widths W, x to the right, y towards the
+player, z up from the white-key surface):
 
-Drawing (cairo): overhead cartoon hands entering from the bottom of the frame,
-soft gradient shading, outline, nails, joint creases and a blurred drop shadow.
+* Each finger has three phalanges with adult proportions (thumb: two) and a
+  knuckle (MCP) at a fixed place on the palm, raised above the keys. The DIP
+  joint bends with the PIP joint (DIP = 0.75 x PIP), as real fingers do.
+* Every frame, a planar inverse-kinematics solve bends each finger so its tip
+  reaches its target in 3D. The overhead camera then shows the curl as
+  foreshortening: a hovering finger curls and looks shorter, and a finger
+  reaching up to a black key straightens instead of stretching.
+* The palm is not fixed. Each frame, its position, yaw and finger spread are
+  fitted (weighted least squares) to the keys the hand is about to play, is
+  playing, or just played, with a prior that keeps it calm. The whole hand
+  travels to the music and fingers stay roughly parallel instead of fanning
+  out from a fixed point. Resting fingers ride along in the hand frame,
+  curved, hovering above the keys.
+* Timing: each finger reaches its key early, the key is fully down exactly at
+  the note onset, and the finger releases before a leap so it never teleports.
+  Everything is a pure function of time, so frames can render in parallel.
+
+Drawing (cairo): tapered jointed fingers with knuckle highlights,
+slope-dependent shading, foreshortened nails and creases. The palm is drawn
+over the finger bases, with knuckle bumps and faint tendons. The thumb comes
+off the side of the palm. A soft drop shadow sits under the hand.
 """
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import cairo
 import cv2
 import numpy as np
 
+from ..geometry import SPAN_COMFORT, WHITE_W as KEY_CM, is_black
 from ..midi_io import group_onsets
 from ..model import LEFT, RIGHT, Note
 from .layout import Layout
-from ..geometry import is_black
 
-# ---- hand model (right hand, in white-key widths; x to the right, y down) -------
-NAT = {1: -2.02, 2: -0.98, 3: 0.0, 4: 0.96, 5: 1.86}      # natural fingertip x offset from palm
-DEV = {1: 2.4, 2: 1.2, 3: 1.05, 4: 1.0, 5: 1.3}          # max comfortable lateral deviation
-KNUCKLE = {2: (-0.90, 0.10), 3: (0.0, 0.0), 4: (0.86, 0.10), 5: (1.60, 0.40)}
-THUMB_BASE = (-1.30, 1.30)
-WIDTH = {1: 0.96, 2: 0.86, 3: 0.88, 4: 0.82, 5: 0.71}    # finger width at the base
-THUMB_DROP = 0.62                                          # thumb touches keys nearer the front edge
-PALM = [(-1.36, 0.40), (-0.90, -0.16), (0.0, -0.24), (0.86, -0.16), (1.60, 0.12), (2.02, 0.55),
-        (2.14, 1.45), (2.05, 2.6), (1.9, 4.4), (-1.40, 4.4), (-1.62, 2.7), (-1.86, 1.85), (-1.66, 1.0)]
+# ----------------------------------------------------------------- hand model (RH)
+# natural fingertip position in the hand frame (relative to the middle knuckle, z ignored)
+NAT = {1: (-2.02, -1.65), 2: (-0.98, -3.00), 3: (0.0, -3.09), 4: (0.95, -3.00), 5: (1.85, -2.29)}
+# knuckles (MCP) on the palm: (x, y, z)
+MCP = {1: (-1.26, 0.66, 0.80), 2: (-0.84, 0.06, 1.62), 3: (0.0, 0.0, 1.68), 4: (0.80, 0.08, 1.60),
+       5: (1.52, 0.34, 1.42)}
+# phalanx lengths (proximal, middle, distal) from adult hand proportions / 2.35 cm
+PHAL = {1: (1.42, 1.12, 0.0), 2: (1.96, 1.11, 0.81), 3: (2.13, 1.28, 0.85), 4: (2.00, 1.19, 0.85),
+        5: (1.62, 0.85, 0.77)}
+# widths at MCP, PIP, DIP, tip
+WID = {1: (0.92, 0.86, 0.80, 0.80), 2: (0.80, 0.74, 0.66, 0.66), 3: (0.82, 0.76, 0.68, 0.68),
+       4: (0.76, 0.70, 0.62, 0.62), 5: (0.66, 0.60, 0.54, 0.54)}
+DEV = {1: 2.4, 2: 1.2, 3: 1.05, 4: 1.0, 5: 1.3}   # max comfortable lateral reach from the natural spot
+# palm outline in the hand frame (x, y); y grows towards the wrist
+PALM = [(-1.18, 0.18), (-0.84, -0.12), (0.0, -0.18), (0.80, -0.10), (1.50, 0.12), (1.84, 0.50),
+        (1.88, 1.40), (1.70, 2.70), (1.40, 3.90), (1.50, 5.4), (1.62, 8.0), (-1.10, 8.0),
+        (-0.98, 5.4), (-0.92, 3.90), (-1.20, 2.95), (-1.60, 1.95), (-1.56, 1.15), (-1.34, 0.55)]
+HOVER = 0.50          # fingertip height of a resting finger
+# how much hand spread moves each resting finger (outer fingers reach, middle fingers stay curled in)
+SPREAD_K = {1: 1.0, 2: 0.45, 3: 0.3, 4: 0.45, 5: 1.0}
+BLACK_Z = 0.45        # black-key top above the white-key surface
+KEY_DIP = 0.22        # key travel shown by the pressing fingertip
+CURL = 0.60           # DIP flex as a fraction of PIP flex
 
-PRE = 0.065      # s: finger descends during [onset-PRE, onset]; key bottoms out at the onset
-REL = 0.07       # s: release / lift time
+PRE = 0.065           # s: finger descends during [onset-PRE, onset]; key bottoms out at the onset
+REL = 0.07            # s: release / lift time
 SAMPLE_HZ = 240
 
 
@@ -54,21 +78,34 @@ def _minjerk(u):
     return u * u * u * (10 - 15 * u + 6 * u * u)
 
 
+def contact_y(lay: Layout, pitch: int, finger: int) -> float:
+    """Where a fingertip meets the key (screen y): fingers play just in front of the
+    black keys, the thumb and pinky nearer the front edge; black keys near their front."""
+    W = lay.white_w
+    if is_black(pitch):
+        front = lay.key_top + lay.black_h
+        return front - (0.30 if finger == 1 else 0.55) * W
+    return lay.key_bottom - {1: 0.62, 2: 1.95, 3: 2.05, 4: 1.95, 5: 1.25}[finger] * W
+
+
 @dataclass
 class Press:
     on: float
     off: float        # visual release
     x: float
     y: float
+    z: float
     note: Note
 
 
 @dataclass
 class FingerState:
-    x: float
+    x: float          # fingertip (screen px)
     y: float
     press: float      # 0 = hovering, 1 = key fully down
     pitch: int | None
+    z: float = 0.0    # fingertip height (W)
+    joints: list = field(default_factory=list)   # [(x, y, z) screen px / W] knuckle .. tip
 
 
 @dataclass
@@ -77,7 +114,44 @@ class HandState:
     palm_x: float
     palm_y: float
     fingers: dict     # f -> FingerState
+    theta: float = 0.0
+    spread: float = 1.0
     visible: float = 1.0
+
+
+class _IK:
+    """Planar finger IK by table lookup: PIP angle b from the knuckle->tip distance."""
+
+    def __init__(self, L):
+        self.L = L
+        b = np.linspace(0.0, 1.85, 400)
+        L1, L2, L3 = L
+        vx = L1 + L2 * np.cos(b) + L3 * np.cos((1 + CURL) * b)
+        vy = -(L2 * np.sin(b) + L3 * np.sin((1 + CURL) * b))
+        r = np.hypot(vx, vy)
+        order = np.argsort(r)
+        self.r, self.b = r[order], b[order]
+        self.phi = np.arctan2(vy, vx)[order]
+        self.rmax = float(r.max())
+
+    def solve(self, d: float, dz: float):
+        """d: horizontal distance knuckle->tip (along the finger), dz: tip z - knuckle z.
+        Returns joint (h, z) offsets for PIP, DIP, tip in the finger plane."""
+        r = math.hypot(d, dz)
+        scale = 1.0
+        if r > self.rmax:
+            scale = r / self.rmax
+            r = self.rmax
+        b = float(np.interp(r, self.r, self.b))
+        phi = float(np.interp(r, self.r, self.phi))
+        a = math.atan2(dz, d) - phi
+        L1, L2, L3 = (l * scale for l in self.L)
+        j1 = (L1 * math.cos(a), L1 * math.sin(a))
+        j2 = (j1[0] + L2 * math.cos(a - b), j1[1] + L2 * math.sin(a - b))
+        if L3 > 0:
+            j3 = (j2[0] + L3 * math.cos(a - (1 + CURL) * b), j2[1] + L3 * math.sin(a - (1 + CURL) * b))
+            return [j1, j2, j3]
+        return [j1, j2]
 
 
 class HandTrack:
@@ -89,13 +163,15 @@ class HandTrack:
         self.notes = sorted(notes, key=lambda n: (n.start, n.pitch))
         self.duration = duration
         s = self.side
+        self.ik = {f: _IK(PHAL[f]) for f in range(1, 6)}
+        self.rest_y = lay.key_bottom + 1.05 * W   # middle knuckle at rest, just behind the key slip
 
         # ---- presses per finger ------------------------------------------
         self.presses: dict[int, list[Press]] = {f: [] for f in range(1, 6)}
         for n in self.notes:
             f = n.finger or 3
-            y = lay.tip_y(n.pitch) + (THUMB_DROP * W if f == 1 else 0.0)
-            self.presses[f].append(Press(n.start, n.end, lay.x_center(n.pitch), y, n))
+            z = BLACK_Z if is_black(n.pitch) else 0.0
+            self.presses[f].append(Press(n.start, n.end, lay.x_center(n.pitch), contact_y(lay, n.pitch, f), z, n))
         onsets_by_pitch: dict[int, list[float]] = {}
         for n in self.notes:
             onsets_by_pitch.setdefault(n.pitch, []).append(n.start)
@@ -114,168 +190,177 @@ class HandTrack:
                 if later:
                     off = min(off, later[0] - PRE - 0.01)
                 p.off = max(off, p.on + 0.04)
-        self.visual_end = {p.note.id: p.off for ps in self.presses.values() for p in ps}
-        self._on = {f: np.array([p.on for p in ps]) for f, ps in self.presses.items()}
-
-        # ---- palm targets per onset group ----------------------------------
-        groups = group_onsets(self.notes) if self.notes else []
-        times, raw, lo_b, hi_b, blk = [], [], [], [], []
-        for g in groups:
-            t = g[0].start
-            held = [n for n in self.notes if n.start < t - 0.02 and n.end > t + 0.05]
-            eng = [(n, 1.0) for n in g] + [(n, 0.6) for n in held]
-            xs = [(lay.x_center(n.pitch) - s * NAT[n.finger or 3] * W, w) for n, w in eng]
-            raw.append(sum(x * w for x, w in xs) / sum(w for _, w in xs))
-            lo = max(lay.x_center(n.pitch) - s * NAT[n.finger or 3] * W - 0.85 * DEV[n.finger or 3] * W for n in g)
-            hi = min(lay.x_center(n.pitch) - s * NAT[n.finger or 3] * W + 0.85 * DEV[n.finger or 3] * W for n in g)
-            lo_b.append(lo)
-            hi_b.append(hi)
-            times.append(t)
-            blk.append(sum(1.0 for n, _ in eng if is_black(n.pitch)) / len(eng))
-        times = np.array(times)
-        raw = np.array(raw)
-        if len(times):
-            sm = []
-            for k, t in enumerate(times):
-                w = np.exp(-((times - t) / 0.9) ** 2) * (np.abs(times - t) < 2.0)
-                v = float((w * raw).sum() / w.sum())
-                if lo_b[k] <= hi_b[k]:
-                    v = min(max(v, lo_b[k]), hi_b[k])
-                sm.append(v)
-            targets, cur = [], sm[0]
-            for k, v in enumerate(sm):
-                feasible = lo_b[k] - 1e-6 <= cur <= hi_b[k] + 1e-6 if lo_b[k] <= hi_b[k] else False
-                if abs(v - cur) > 0.6 * W or not feasible:
-                    cur = v
-                targets.append(cur)
-        else:
-            targets = []
-        self.group_times, self.targets = times, np.array(targets)
-        if home_x is None:
-            home_x = self.targets[0] if len(self.targets) else lay.width * (0.68 if s > 0 else 0.32)
-        self.home_x = home_x
-
-        # ---- sample the palm path ------------------------------------------
-        n_s = int(math.ceil((duration + 1.0) * SAMPLE_HZ)) + 1
-        ts = np.arange(n_s) / SAMPLE_HZ
-        px = np.full(n_s, float(self.targets[0]) if len(self.targets) else home_x)
-        for k in range(1, len(self.targets)):
-            a, b = self.targets[k - 1], self.targets[k]
-            if abs(b - a) < 1e-6:
-                continue
-            gap = times[k] - times[k - 1]
-            te = times[k] - 0.035
-            dur = min(0.45, max(0.07, 0.6 * gap))
-            tsv = te - dur
-            u = (ts - tsv) / dur
-            m = ts >= tsv
-            px[m] = a + (b - a) * _minjerk(u[m])
-        # clamp so every pressing finger stays within reach, then smooth the result
+        allp = sorted(((p.on, f, p) for f, ps in self.presses.items() for p in ps), key=lambda e: e[0])
+        ons = [e[0] for e in allp]
         for f, ps in self.presses.items():
             for p in ps:
-                i0, i1 = int((p.on - PRE) * SAMPLE_HZ), int(p.off * SAMPLE_HZ) + 1
-                i0, i1 = max(i0, 0), min(i1, n_s)
-                c = p.x - s * NAT[f] * W
-                lo, hi = c - DEV[f] * W, c + DEV[f] * W
-                px[i0:i1] = np.clip(px[i0:i1], lo, hi)
-        px = cv2.GaussianBlur(px.reshape(1, -1).astype(np.float64), (0, 0), sigmaX=0.022 * SAMPLE_HZ).ravel()
+                j = int(np.searchsorted(ons, p.on + 1e-6))
+                while j < len(allp) and allp[j][0] <= p.off + 0.25:
+                    qon, g, q = allp[j]
+                    j += 1
+                    if g == f:
+                        continue
+                    comfy = SPAN_COMFORT[tuple(sorted((f, g)))] / KEY_CM * W * 1.05
+                    span = abs(q.x - p.x)
+                    if span > comfy:
+                        travel = min(0.20, max(0.08, (span - comfy) / (12.0 * W)))
+                        p.off = max(p.on + 0.06, min(p.off, qon - PRE - travel))
+        self._on = {f: np.array([p.on for p in ps]) for f, ps in self.presses.items()}
+        self.visual_end = {p.note.id: p.off for ps in self.presses.values() for p in ps}
+
+        # ---- palm prior: smoothed hand position per onset group -------------
+        groups = group_onsets(self.notes) if self.notes else []
+        times, raw = [], []
+        for g in groups:
+            t = g[0].start
+            xs = [lay.x_center(n.pitch) - s * NAT[n.finger or 3][0] * W for n in g]
+            times.append(t)
+            raw.append(sum(xs) / len(xs))
+        n_s = int(math.ceil((duration + 1.0) * SAMPLE_HZ)) + 1
+        if home_x is None:
+            home_x = raw[0] if raw else lay.width * (0.68 if s > 0 else 0.32)
+        px = np.full(n_s, float(home_x))
+        for t, x in zip(times, raw):
+            px[int(t * SAMPLE_HZ):] = x
+        px = cv2.GaussianBlur(px.reshape(1, -1).astype(np.float64), (0, 0), sigmaX=0.45 * SAMPLE_HZ).ravel()
+        # shift earlier so the prior anticipates rather than lags
+        lead = int(0.25 * SAMPLE_HZ)
+        px = np.concatenate([px[lead:], np.full(lead, px[-1])])
         self.palm_samples = px
-        # palm height: push forward a little when black keys are engaged
-        py = np.zeros(n_s)
-        for k, t in enumerate(times):
-            py[int(t * SAMPLE_HZ):] = blk[k]
-        py = cv2.GaussianBlur(py.reshape(1, -1), (0, 0), sigmaX=0.12 * SAMPLE_HZ).ravel()
-        self.palm_y_samples = lay.knuckle_y - py * 0.42 * W
+        self.home_x = home_x
 
     # ------------------------------------------------------------------
-    def palm_at(self, t: float) -> tuple[float, float]:
+    def palm_prior(self, t: float) -> float:
         i = t * SAMPLE_HZ
         i0 = int(min(max(math.floor(i), 0), len(self.palm_samples) - 2))
         a = min(max(i - i0, 0.0), 1.0)
-        x = self.palm_samples[i0] * (1 - a) + self.palm_samples[i0 + 1] * a
-        y = self.palm_y_samples[i0] * (1 - a) + self.palm_y_samples[i0 + 1] * a
-        return float(x), float(y)
-
-    def rest_tip(self, f: int, palm_x: float, palm_y: float) -> tuple[float, float]:
-        W = self.W
-        x = palm_x + self.side * NAT[f] * W
-        y = self.lay.tip_y_white - (0.12 * W if f in (2, 3, 4) else 0.0) + (palm_y - self.lay.knuckle_y)
-        if f == 1:
-            y += (THUMB_DROP + 0.12) * W
-        return x, y
+        return float(self.palm_samples[i0] * (1 - a) + self.palm_samples[i0 + 1] * a)
 
     def finger_at(self, f: int, t: float):
-        """-> (key_x, key_y, rest_weight, press, pitch). rest_weight 0 = at/near its key,
-        1 = fully relaxed (position then comes from the hand frame, see state())."""
+        """-> (key_x, key_y, key_z, rest_weight, press, pitch, fit_weight).
+        rest_weight 0 = at/near its key, 1 = relaxed in the hand frame.
+        fit_weight: how strongly this finger's key steers the palm (wider window)."""
         ps = self.presses[f]
         if not ps:
-            return None, None, 1.0, 0.0, None
+            return None, None, 0.0, 1.0, 0.0, None, 0.0
         on = self._on[f]
-        i = int(np.searchsorted(on - PRE, t, side="right")) - 1   # last press whose descent has begun
+        i = int(np.searchsorted(on - PRE, t, side="right")) - 1
         cur = ps[i] if i >= 0 else None
         nxt = ps[i + 1] if i + 1 < len(ps) else None
+        fit_prev = 0.0 if cur is None else (1.0 if t <= cur.off else 1.0 - float(_smooth((t - cur.off) / 0.18)))
+        fit_next = 0.0 if nxt is None else float(_smooth((t - (nxt.on - PRE - 0.45)) / 0.36))
+        fit_w = max(fit_prev, fit_next)
         if cur is not None and t <= cur.off + REL:
             if t < cur.on:
-                pr = _smooth((t - (cur.on - PRE)) / PRE)
+                pr = float(_smooth((t - (cur.on - PRE)) / PRE))
             elif t <= cur.off:
                 pr = 1.0
             else:
-                pr = 1.0 - _smooth((t - cur.off) / REL)
-            return cur.x, cur.y, 0.0, float(pr), cur.note.pitch
+                pr = 1.0 - float(_smooth((t - cur.off) / REL))
+            return cur.x, cur.y, cur.z, 0.0, pr, cur.note.pitch, 1.0
         t_free = cur.off + REL if cur else -1e9
         t_need = nxt.on - PRE - 0.015 if nxt else 1e9
         if cur and nxt:
             G = max(t_need - t_free, 1e-3)
-            u = _minjerk((t - t_free) / G)              # travel spread over the whole free gap
-            kx = cur.x + (nxt.x - cur.x) * u
-            ky = cur.y + (nxt.y - cur.y) * u
-            relax = min(1.0, max(0.0, (G - 0.25) / 0.5))
-            w = relax * _smooth((t - t_free) / 0.24) * _smooth((t_need - 0.12 - t) / 0.26)
+            u = float(_minjerk((t - t_free) / G))
+            kx, ky, kz = (cur.x + (nxt.x - cur.x) * u, cur.y + (nxt.y - cur.y) * u, cur.z + (nxt.z - cur.z) * u)
+            relax = min(1.0, max(0.0, (G - 0.20) / 0.35))
+            # a released finger lifts and rides with the hand straight away
+            w = relax * float(_smooth((t - t_free) / 0.22) * _smooth((t_need - 0.10 - t) / 0.24))
         elif nxt:
-            kx, ky = nxt.x, nxt.y
-            w = _smooth((t_need - 0.06 - t) / 0.30)
+            kx, ky, kz = nxt.x, nxt.y, nxt.z
+            w = float(_smooth((t_need - 0.06 - t) / 0.30))
         else:
-            kx, ky = cur.x, cur.y
-            w = _smooth((t - t_free) / 0.30)
-        return kx, ky, float(w), 0.0, None
+            kx, ky, kz = cur.x, cur.y, cur.z
+            w = float(_smooth((t - t_free) / 0.30))
+        return kx, ky, kz, w, 0.0, None, fit_w
+
+    def _fit_palm(self, raw, t):
+        """Weighted least squares for palm (x, y), yaw theta and finger spread s, in W units:
+        tip_f ~ P + R(theta) diag(s, 1) NAT_f (theta linearised), with a calm prior."""
+        W, s = self.W, self.side
+        px0, py0 = self.palm_prior(t) / W, self.rest_y / W
+        # unknowns u = [px, py, theta, s]
+        A, b = [], []
+        lam = (0.35, 1.2, 9.0, 5.0)
+        for k, (val, l) in enumerate(zip((px0, py0, 0.0, 1.0), lam)):
+            row = [0.0] * 4
+            row[k] = math.sqrt(l)
+            A.append(row)
+            b.append(math.sqrt(l) * val)
+        for f, r in raw.items():
+            kx, ky, kz, w, pr, pitch, fw = r
+            if kx is None or fw <= 1e-4:
+                continue
+            e = math.sqrt(fw)
+            nx, ny = s * NAT[f][0], NAT[f][1]
+            if f == 1:
+                e *= 0.6          # the thumb is the most mobile finger
+            A.append([e, 0.0, -e * ny, e * nx])
+            b.append(e * kx / W)
+            A.append([0.0, e, e * nx, 0.0])
+            b.append(e * (ky / W - ny))       # tip_y = py + theta * nx + ny
+        sol, *_ = np.linalg.lstsq(np.array(A), np.array(b), rcond=None)
+        px, py, th, sp = sol
+        th = float(np.clip(th, -0.30, 0.30))
+        sp = float(np.clip(sp, 0.85, 1.65))
+        py = float(np.clip(py, py0 - 1.6, py0 + 0.4))
+        return px * W, py * W, th, sp
+
+    def frame_point(self, P, th, sp, x, y, spread_k=1.0):  # noqa: D401
+        """Hand-frame point (W units, RH convention) -> screen px."""
+        W, s = self.W, self.side
+        xx = s * x * (1 + (sp - 1) * spread_k)
+        c, si = math.cos(th), math.sin(th)
+        return P[0] + (c * xx - si * y) * W, P[1] + (si * xx + c * y) * W
 
     def state(self, t: float) -> HandState:
-        """All quantities are continuous in t: anchors and mobilities are blended
-        smoothly (no thresholds), so fingers never teleport between frames."""
-        palm_x, palm_y = self.palm_at(t)
-        s, W = self.side, self.W
+        W, s = self.W, self.side
         raw = {f: self.finger_at(f, t) for f in range(1, 6)}
-        # how firmly each finger is anchored to a key (1 = pressing / on its way, 0 = relaxed)
-        anchor = {f: (0.0 if r[0] is None else (1.0 - r[2])) for f, r in raw.items()}
-        cur_x = {f: (r[0] if r[0] is not None else None) for f, r in raw.items()}
-        fingers, mob = {}, {}
+        px, py, th, sp = self._fit_palm(raw, t)
+        P = (px, py)
+        fingers = {}
+        idle = 0.04 * W
         for f in range(1, 6):
-            kx, ky, w, pr, pitch = raw[f]
-            rx, ry = self.rest_tip(f, palm_x, palm_y)
-            # hand-frame estimate of where this finger would naturally be, from the other fingers
-            num, den = 0.35 * rx, 0.35
-            for a in range(1, 6):
-                if a == f or cur_x[a] is None or anchor[a] <= 0:
-                    continue
-                wa = anchor[a] / (abs(a - f) ** 2) * (0.5 if 1 in (a, f) else 1.0)
-                num += wa * (cur_x[a] + s * (NAT[f] - NAT[a]) * W)
-                den += wa
-            rx = num / den
+            kx, ky, kz, w, pr, pitch, fw = raw[f]
+            nxf, nyf = NAT[f]
+            fx, fy = self.frame_point(P, th, sp, nxf, nyf + (0.42 if f > 1 else 0.15), spread_k=SPREAD_K[f])
+            fx += idle * math.sin(t * 1.3 + f * 1.7)          # a little life in resting fingers
+            fy += idle * 0.6 * math.sin(t * 0.9 + f * 2.3)
             if kx is None:
-                x, y = rx, ry
+                x, y, z_key = fx, fy, 0.0
             else:
-                x, y = kx + (rx - kx) * w, ky + (ry - ky) * w
-            fingers[f] = FingerState(float(x), float(y), pr, pitch)
-            mob[f] = (1.0 - pr) ** 3 * w   # only relaxed fingers yield; one on/heading to its key stays put
-        self._separate(fingers, mob)
-        return HandState(self.side, palm_x, palm_y, fingers)
+                x, y = kx + (fx - kx) * w, ky + (fy - ky) * w
+                z_key = kz * (1 - w)
+            z = z_key - KEY_DIP * pr + (1 - pr) * (0.28 + (HOVER - 0.28) * w)
+            fingers[f] = FingerState(float(x), float(y), pr, pitch, float(z))
+        self._separate(fingers, raw)
+        # knuckles from the palm, then IK for every finger
+        for f in range(1, 6):
+            mx, my, mz = MCP[f]
+            kxs, kys = self.frame_point(P, th, sp, mx, my, spread_k=0.3)
+            fs = fingers[f]
+            dx, dy = fs.x - kxs, fs.y - kys
+            d = math.hypot(dx, dy) / W
+            ux, uy = (dx / (d * W), dy / (d * W)) if d > 1e-6 else (0.0, -1.0)
+            pts = self.ik[f].solve(max(d, 1e-3), fs.z - mz)
+            hs, prev = [], 0.0
+            for k_, (h, zz) in enumerate(pts):          # keep the projection advancing towards the tip
+                lo = prev + 0.12 * PHAL[f][k_] * max(0.3, 1 - prev / max(d, 1e-3))
+                h = min(max(h, lo), d)
+                hs.append((h, zz))
+                prev = h
+            joints = [(kxs, kys, mz)] + [(kxs + ux * h * W, kys + uy * h * W, mz + zz) for h, zz in hs]
+            joints[-1] = (fs.x, fs.y, fs.z)       # the tip lands exactly on its target
+            fs.joints = joints
+        return HandState(s, px, py, fingers, th, sp)
 
-    def _separate(self, fingers, mob):
-        """Keep fingertips 2-5 ordered and apart; corrections are shared in proportion
-        to each finger's mobility (pressing fingers have none)."""
-        s, gap = self.side, 0.80 * self.W
+    def _separate(self, fingers, raw):
+        """Relaxed fingertips 2-5 keep their order and spacing (pressing fingers never move)."""
+        s, gap = self.side, 0.74 * self.W
+        mob = {f: (1.0 - fingers[f].press) ** 3 * raw[f][3] for f in range(1, 6)}
         order = [2, 3, 4, 5]
-        for _ in range(4):
+        for _ in range(8):
             for a, b in zip(order, order[1:]):
                 fa, fb = fingers[a], fingers[b]
                 d = (fb.x - fa.x) * s
@@ -288,24 +373,19 @@ class HandTrack:
                 need = (gap - d) * min(1.0, tot / 0.5)
                 fa.x -= s * need * ma / tot
                 fb.x += s * need * mb / tot
-        # a free thumb stays on its side of the index finger
-        f1, f2 = fingers[1], fingers[2]
-        d = (f2.x - f1.x) * s
-        if d < 0.75 * self.W:
-            f1.x -= s * (0.75 * self.W - d) * min(1.0, mob[1] / 0.7) ** 2
 
 
 # ======================================================================= drawing
 @dataclass
 class HandStyle:
-    skin: tuple = (0.976, 0.808, 0.663)
-    skin_light: tuple = (1.0, 0.894, 0.788)
-    skin_shade: tuple = (0.886, 0.651, 0.502)
-    outline: tuple = (0.478, 0.290, 0.212)
-    nail: tuple = (1.0, 0.902, 0.871)
-    crease: tuple = (0.737, 0.478, 0.365)
-    shadow_alpha: float = 0.26
-    outline_w: float = 2.6
+    skin: tuple = (0.965, 0.800, 0.665)
+    skin_light: tuple = (1.0, 0.895, 0.80)
+    skin_shade: tuple = (0.855, 0.640, 0.515)
+    outline: tuple = (0.470, 0.300, 0.230)
+    nail: tuple = (0.995, 0.890, 0.860)
+    crease: tuple = (0.700, 0.470, 0.370)
+    shadow_alpha: float = 0.24
+    outline_w: float = 2.2
 
     @staticmethod
     def from_hex(skin: str | None = None, outline: str | None = None) -> "HandStyle":
@@ -313,9 +393,9 @@ class HandStyle:
         if skin:
             r, g, b = hex_rgb(skin)
             st.skin = (r, g, b)
-            st.skin_light = tuple(min(1.0, c * 1.08 + 0.05) for c in (r, g, b))
-            st.skin_shade = tuple(c * 0.88 for c in (r, g, b))
-            st.crease = tuple(c * 0.74 for c in (r, g, b))
+            st.skin_light = tuple(min(1.0, c * 1.07 + 0.05) for c in (r, g, b))
+            st.skin_shade = tuple(c * 0.86 for c in (r, g, b))
+            st.crease = tuple(c * 0.72 for c in (r, g, b))
         if outline:
             st.outline = hex_rgb(outline)
         return st
@@ -324,6 +404,10 @@ class HandStyle:
 def hex_rgb(h: str) -> tuple:
     h = h.lstrip("#")
     return tuple(int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))
+
+
+def _mix(a, b, t):
+    return tuple(a[i] * (1 - t) + b[i] * t for i in range(3))
 
 
 def _catmull(ctx, pts, closed=True):
@@ -342,263 +426,293 @@ def _catmull(ctx, pts, closed=True):
 class HandGeometry:
     """Resolves a HandState into drawable shapes (pixel coordinates)."""
 
+    def base_dir(self, f):
+        return self.thumb_in if f == 1 else self.wrist
+
     def __init__(self, st: HandState, W: float):
-        s = st.side
-        self.st, self.W, self.s = st, W, s
-        px, py = st.palm_x, st.palm_y
-        self.palm = [(px + s * x * W, py + y * W) for x, y in PALM]
+        self.st, self.W, self.s = st, W, st.side
+        c, si = math.cos(st.theta), math.sin(st.theta)
+
+        def fp(x, y):
+            xx = st.side * x
+            return st.palm_x + (c * xx - si * y) * W, st.palm_y + (si * xx + c * y) * W
+
+        self.fp = fp
+        self.palm = [fp(x, y) for x, y in PALM]
         self.fingers = {}
-        for f in (2, 3, 4, 5):
-            kx, ky = KNUCKLE[f]
-            k = (px + s * kx * W, py + ky * W)
+        for f in range(1, 6):
             fs = st.fingers[f]
-            self.fingers[f] = (k, (fs.x, fs.y), WIDTH[f] * W, fs.press)
-        bx, by = THUMB_BASE
-        base = (px + s * bx * W, py + by * W)
-        ts = st.fingers[1]
-        self.thumb = (base, (ts.x, ts.y), WIDTH[1] * W, ts.press)
-
-    @staticmethod
-    def finger_path(ctx, k, tip, wb, press, W, base_ext=0.9):
-        dx, dy = tip[0] - k[0], tip[1] - k[1]
+            js = fs.joints
+            wid = WID[f]
+            if f == 1:
+                wid = (wid[0], wid[1], wid[3])
+            self.fingers[f] = (js, [w * W for w in wid], fs.press)
+        self.wrist = (-si, c)      # unit vector along the hand towards the wrist
+        k1 = self.fingers[1][0][0]
+        inner = fp(-0.55, 1.75)
+        dx, dy = inner[0] - k1[0], inner[1] - k1[1]
         L = math.hypot(dx, dy) or 1.0
-        d = (dx / L, dy / L)
-        n = (-d[1], d[0])
-        wt = wb * (0.86 + 0.04 * press)
-        r = wt / 2
-        b0 = (k[0] - d[0] * base_ext * W, k[1] - d[1] * base_ext * W)
-        jm = 0.52
-        m = (k[0] + dx * jm, k[1] + dy * jm)
-        wm = (wb + wt) / 2 * 1.035
-        ctx.move_to(b0[0] + n[0] * wb / 2, b0[1] + n[1] * wb / 2)
-        ctx.line_to(k[0] + n[0] * wb / 2, k[1] + n[1] * wb / 2)
-        ctx.curve_to(m[0] + n[0] * wm / 2 - d[0] * L * 0.12, m[1] + n[1] * wm / 2 - d[1] * L * 0.12,
-                     m[0] + n[0] * wm / 2 + d[0] * L * 0.12, m[1] + n[1] * wm / 2 + d[1] * L * 0.12,
-                     tip[0] + n[0] * r, tip[1] + n[1] * r)
-        a0 = math.atan2(n[1], n[0])
-        ctx.arc_negative(tip[0], tip[1], r, a0, a0 - math.pi)   # n = d rotated +90deg -> sweep through d
-        ctx.curve_to(m[0] - n[0] * wm / 2 + d[0] * L * 0.12, m[1] - n[1] * wm / 2 + d[1] * L * 0.12,
-                     m[0] - n[0] * wm / 2 - d[0] * L * 0.12, m[1] - n[1] * wm / 2 - d[1] * L * 0.12,
-                     k[0] - n[0] * wb / 2, k[1] - n[1] * wb / 2)
-        ctx.line_to(b0[0] - n[0] * wb / 2, b0[1] - n[1] * wb / 2)
-        ctx.close_path()
-        return d, n, L, wt
-
-    def thumb_path(self, ctx):
-        base, tip, wb, press = self.thumb
-        W, s = self.W, self.s
-        # bend point bulges outward (away from the fingers)
-        mx, my = base[0] + (tip[0] - base[0]) * 0.5, base[1] + (tip[1] - base[1]) * 0.5
-        dx, dy = tip[0] - base[0], tip[1] - base[1]
-        L = math.hypot(dx, dy) or 1.0
-        n = (-dy / L, dx / L)
-        if n[0] * s > 0:
-            n = (-n[0], -n[1])
-        j = (mx + n[0] * 0.22 * W, my + n[1] * 0.22 * W)
-        return j
+        self.thumb_in = (dx / L, dy / L)
 
 
-def _fill_finger(ctx, k, tip, wb, press, W, style: HandStyle, base_ext=0.9):
-    d, n, L, wt = HandGeometry.finger_path(ctx, k, tip, wb, press, W, base_ext)
-    c = tip
-    g = cairo.LinearGradient(c[0] + n[0] * wt * 0.62, c[1] + n[1] * wt * 0.62,
-                             c[0] - n[0] * wt * 0.62, c[1] - n[1] * wt * 0.62)
+def _finger_outline(ctx, js, ws, W, base_ext=0.55, wrist=(0.0, 1.0)):
+    """Tapered polyline through the joints with a rounded fingertip."""
+    pts = [(j[0], j[1]) for j in js]
+    # extend the base under the palm, towards the wrist (never out of the far side of the hand)
+    base = (pts[0][0] + wrist[0] * base_ext * W, pts[0][1] + wrist[1] * base_ext * W)
+    pts = [base] + pts
+    ws = [ws[0]] + list(ws)
+    # narrow the shafts between the joints (from the knuckle on)
+    P2, W2 = [pts[0], pts[1]], [ws[0], ws[1]]
+    for i in range(2, len(pts)):
+        m = ((pts[i - 1][0] + pts[i][0]) / 2, (pts[i - 1][1] + pts[i][1]) / 2)
+        if math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]) > 0.25 * W:
+            P2.append(m)
+            W2.append((ws[i - 1] + ws[i]) / 2 * 0.90)
+        P2.append(pts[i])
+        W2.append(ws[i])
+    pts, ws = P2, W2
+    dirs = []
+    for i in range(len(pts) - 1):
+        ddx, ddy = pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]
+        l = math.hypot(ddx, ddy)
+        dirs.append((ddx / l, ddy / l) if l > 1e-3 else (dirs[-1] if dirs else (0.0, -1.0)))
+    normals = []
+    for i in range(len(pts)):
+        if i == 0:
+            d = dirs[0]
+        elif i == len(pts) - 1:
+            d = dirs[-1]
+        else:
+            a, b = dirs[i - 1], dirs[i]
+            d = (a[0] + b[0], a[1] + b[1])
+            l = math.hypot(*d)
+            d = (d[0] / l, d[1] / l) if l > 1e-6 else b
+        normals.append((-d[1], d[0]))
+    left = [(p[0] + n[0] * w / 2, p[1] + n[1] * w / 2) for p, n, w in zip(pts, normals, ws)]
+    right = [(p[0] - n[0] * w / 2, p[1] - n[1] * w / 2) for p, n, w in zip(pts, normals, ws)]
+    tip = pts[-1]
+    r = ws[-1] / 2
+    n = normals[-1]
+    ctx.move_to(*left[0])
+    for i in range(1, len(left)):
+        # smooth the sides through the joints
+        p0, p1 = left[i - 1], left[i]
+        ctx.curve_to(p0[0] + (p1[0] - p0[0]) * 0.35, p0[1] + (p1[1] - p0[1]) * 0.35,
+                     p0[0] + (p1[0] - p0[0]) * 0.65, p0[1] + (p1[1] - p0[1]) * 0.65, p1[0], p1[1])
+    a0 = math.atan2(n[1], n[0])
+    ctx.arc_negative(tip[0], tip[1], r, a0, a0 - math.pi)
+    for i in range(len(right) - 2, -1, -1):
+        p0, p1 = right[i + 1], right[i]
+        ctx.curve_to(p0[0] + (p1[0] - p0[0]) * 0.35, p0[1] + (p1[1] - p0[1]) * 0.35,
+                     p0[0] + (p1[0] - p0[0]) * 0.65, p0[1] + (p1[1] - p0[1]) * 0.65, p1[0], p1[1])
+    ctx.close_path()
+    return pts, normals, dirs
+
+
+def _fill_finger(ctx, js, ws, press, W, style: HandStyle, wrist=(0.0, 1.0)):
+    pts, normals, dirs = _finger_outline(ctx, js, ws, W, wrist=wrist)
+    path = ctx.copy_path()
+    # lengthwise light: knuckle tops (high) catch the light, steep phalanges turn away
+    k, tip = pts[1], pts[-1]
+    g = cairo.LinearGradient(pts[0][0], pts[0][1], tip[0], tip[1])
+    total = math.hypot(tip[0] - pts[0][0], tip[1] - pts[0][1]) or 1.0
+
+    def frac(p):
+        return min(1.0, max(0.0, ((p[0] - pts[0][0]) * (tip[0] - pts[0][0]) + (p[1] - pts[0][1]) * (tip[1] - pts[0][1])) / total ** 2))
+
     sk, li, sh = style.skin, style.skin_light, style.skin_shade
-    g.add_color_stop_rgb(0.0, *sh)
-    g.add_color_stop_rgb(0.32, *sk)
-    g.add_color_stop_rgb(0.55, *li)
-    g.add_color_stop_rgb(1.0, *sh)
+    g.add_color_stop_rgb(0.0, *sk)
+    for i in range(1, len(js) - 1):           # PIP / DIP: highlight on the joint, shade on the steep side
+        f = frac((js[i][0], js[i][1]))
+        g.add_color_stop_rgb(max(0.0, f - 0.06), *_mix(sk, li, 0.35))
+        g.add_color_stop_rgb(f, *li)
+        z0, z1 = js[i][2], js[i + 1][2]
+        hlen = math.hypot(js[i + 1][0] - js[i][0], js[i + 1][1] - js[i][1]) / W
+        steep = min(1.0, abs(z1 - z0) / max(hlen + abs(z1 - z0), 1e-3))
+        f2 = frac((js[i + 1][0], js[i + 1][1]))
+        g.add_color_stop_rgb(min(1.0, (f + f2) / 2), *_mix(sk, sh, 0.15 + 0.55 * steep))
+    g.add_color_stop_rgb(1.0, *_mix(sk, sh, 0.25 + 0.25 * press))
     ctx.set_source(g)
-    return d, n, L, wt
+    ctx.fill()
+    # cross shading for roundness (darker edges, light from the upper left)
+    ctx.append_path(path)
+    ctx.save()
+    ctx.clip()
+    for i in range(len(pts) - 1):
+        p0, p1 = pts[i], pts[i + 1]
+        n = normals[i]
+        w = ws[min(i + 1, len(ws) - 1)] if i else ws[0]
+        mx, my = (p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2
+        cg = cairo.LinearGradient(mx + n[0] * w * 0.6, my + n[1] * w * 0.6, mx - n[0] * w * 0.6, my - n[1] * w * 0.6)
+        cg.add_color_stop_rgba(0.0, *sh, 0.55)
+        cg.add_color_stop_rgba(0.3, *sh, 0.0)
+        cg.add_color_stop_rgba(0.62, *li, 0.18)
+        cg.add_color_stop_rgba(1.0, *sh, 0.6)
+        ctx.set_source(cg)
+        d = dirs[i]
+        L = math.hypot(p1[0] - p0[0], p1[1] - p0[1]) + w
+        ctx.save()
+        ctx.translate(mx, my)
+        ctx.rotate(math.atan2(d[1], d[0]))
+        ctx.rectangle(-L / 2 - 2, -w, L + 4, 2 * w)
+        ctx.restore()
+        ctx.fill()
+    ctx.restore()
+    return pts, normals, dirs
 
 
-def _finger_details(ctx, k, tip, wt, press, W, style: HandStyle):
-    dx, dy = tip[0] - k[0], tip[1] - k[1]
-    L = math.hypot(dx, dy) or 1.0
-    d = (dx / L, dy / L)
-    n = (-d[1], d[0])
+def _finger_details(ctx, js, ws, press, W, style: HandStyle, thumb=False):
+    # creases on the joints (PIP / DIP or thumb IP)
+    for i in range(1, len(js) - 1):
+        a, b = js[i - 1], js[i + 1]
+        d = (b[0] - a[0], b[1] - a[1])
+        L = math.hypot(*d) or 1.0
+        d = (d[0] / L, d[1] / L)
+        n = (-d[1], d[0])
+        c = js[i]
+        w = ws[i] * 0.42
+        ctx.set_source_rgba(*style.crease, 0.45)
+        ctx.set_line_width(max(1.0, W * 0.03))
+        for off in (-0.05, 0.05):
+            ox, oy = c[0] + d[0] * off * W, c[1] + d[1] * off * W
+            ctx.move_to(ox + n[0] * w, oy + n[1] * w)
+            ctx.curve_to(ox + n[0] * w * 0.3 + d[0] * W * 0.04, oy + n[1] * w * 0.3 + d[1] * W * 0.04,
+                         ox - n[0] * w * 0.3 + d[0] * W * 0.04, oy - n[1] * w * 0.3 + d[1] * W * 0.04,
+                         ox - n[0] * w, oy - n[1] * w)
+            ctx.stroke()
+        # joint highlight (the bent joint is the highest point)
+        ctx.save()
+        ctx.translate(c[0] - d[0] * 0.04 * W, c[1] - d[1] * 0.04 * W)
+        ctx.rotate(math.atan2(d[1], d[0]))
+        ctx.scale(ws[i] * 0.22, ws[i] * 0.16)
+        ctx.arc(0, 0, 1, 0, 2 * math.pi)
+        ctx.restore()
+        ctx.set_source_rgba(1, 1, 1, 0.20)
+        ctx.fill()
+    # nail on the last phalanx, foreshortened by its slope
+    p0, p1 = js[-2], js[-1]
+    dx, dy = p1[0] - p0[0], p1[1] - p0[1]
+    hl = math.hypot(dx, dy)
+    d = (dx / hl, dy / hl) if hl > 1e-3 else (0.0, -1.0)
+    wt = ws[-1]
+    nl = max(wt * 0.24, min(wt * 0.52, hl * 0.42))
+    nw = wt * (0.30 if not thumb else 0.34)
+    cx, cy = p1[0] - d[0] * (nl * 0.85 + wt * 0.05), p1[1] - d[1] * (nl * 0.85 + wt * 0.05)
     ang = math.atan2(d[1], d[0])
-    # joint creases
-    ctx.set_source_rgba(*style.crease, 0.55)
-    ctx.set_line_width(max(1.2, W * 0.035))
-    for frac, wfrac in ((0.30, 0.42), (0.58, 0.46)):
-        cx, cy = tip[0] - d[0] * L * frac, tip[1] - d[1] * L * frac
-        hw = wt * wfrac / 2
-        ctx.move_to(cx + n[0] * hw, cy + n[1] * hw)
-        ctx.curve_to(cx + n[0] * hw * 0.3 + d[0] * W * 0.05, cy + n[1] * hw * 0.3 + d[1] * W * 0.05,
-                     cx - n[0] * hw * 0.3 + d[0] * W * 0.05, cy - n[1] * hw * 0.3 + d[1] * W * 0.05,
-                     cx - n[0] * hw, cy - n[1] * hw)
-        ctx.stroke()
-    # nail (shorter and closer to the tip when the finger curls into the key)
-    nl = wt * (0.40 - 0.10 * press)
-    nw = wt * 0.29
-    off = wt * (0.30 - 0.12 * press)
-    cx, cy = tip[0] - d[0] * off, tip[1] - d[1] * off
     ctx.save()
     ctx.translate(cx, cy)
     ctx.rotate(ang)
     ctx.scale(nl, nw)
     ctx.arc(0, 0, 1, 0, 2 * math.pi)
     ctx.restore()
-    ctx.set_source_rgba(*style.nail, 0.95)
+    ctx.set_source_rgba(*style.nail, 0.96)
     ctx.fill_preserve()
-    ctx.set_source_rgba(*style.crease, 0.6)
-    ctx.set_line_width(max(1.0, W * 0.025))
+    ctx.set_source_rgba(*style.crease, 0.55)
+    ctx.set_line_width(max(0.9, W * 0.022))
     ctx.stroke()
-    # nail highlight
     ctx.save()
-    ctx.translate(cx + d[0] * nl * 0.25 - n[0] * nw * 0.25, cy + d[1] * nl * 0.25 - n[1] * nw * 0.25)
+    ctx.translate(cx + d[0] * nl * 0.2 - d[1] * nw * 0.3, cy + d[1] * nl * 0.2 + d[0] * nw * 0.3)
     ctx.rotate(ang)
-    ctx.scale(nl * 0.35, nw * 0.28)
+    ctx.scale(nl * 0.38, nw * 0.25)
     ctx.arc(0, 0, 1, 0, 2 * math.pi)
     ctx.restore()
     ctx.set_source_rgba(1, 1, 1, 0.55)
     ctx.fill()
-
-
-def _thumb_shape(ctx, geo: HandGeometry):
-    base, tip, wb, press = geo.thumb
-    j = geo.thumb_path(ctx)
-    W = geo.W
-    # two capsules: base->joint, joint->tip; drawn as one smooth outline via a polyline offset
-    pts_c = [base, j, tip]
-    ws = [wb * 1.18, wb * 1.02, wb * 0.86]
-    left, right = [], []
-    for i, p in enumerate(pts_c):
-        if i == 0:
-            v = (pts_c[1][0] - p[0], pts_c[1][1] - p[1])
-        elif i == len(pts_c) - 1:
-            v = (p[0] - pts_c[i - 1][0], p[1] - pts_c[i - 1][1])
-        else:
-            v = (pts_c[i + 1][0] - pts_c[i - 1][0], pts_c[i + 1][1] - pts_c[i - 1][1])
-        L = math.hypot(*v) or 1.0
-        nn = (-v[1] / L, v[0] / L)
-        left.append((p[0] + nn[0] * ws[i] / 2, p[1] + nn[1] * ws[i] / 2))
-        right.append((p[0] - nn[0] * ws[i] / 2, p[1] - nn[1] * ws[i] / 2))
-    v = (tip[0] - j[0], tip[1] - j[1])
-    L = math.hypot(*v) or 1.0
-    d = (v[0] / L, v[1] / L)
-    n = (-d[1], d[0])
-    r = ws[-1] / 2
-    ctx.move_to(*left[0])
-    ctx.curve_to(left[0][0] * 0.4 + left[1][0] * 0.6, left[0][1] * 0.4 + left[1][1] * 0.6,
-                 left[1][0], left[1][1], (left[1][0] + left[2][0]) / 2, (left[1][1] + left[2][1]) / 2)
-    ctx.line_to(*left[2])
-    a0 = math.atan2(n[1], n[0])
-    ctx.arc_negative(tip[0], tip[1], r, a0, a0 - math.pi)
-    ctx.line_to((right[1][0] + right[2][0]) / 2, (right[1][1] + right[2][1]) / 2)
-    ctx.curve_to(right[1][0], right[1][1], right[0][0] * 0.4 + right[1][0] * 0.6,
-                 right[0][1] * 0.4 + right[1][1] * 0.6, *right[0])
-    ctx.close_path()
-    return j, ws[-1]
+    # weight on the key: the pressing fingertip pad darkens slightly
+    if press > 0.01:
+        rg = cairo.RadialGradient(p1[0], p1[1], 0, p1[0], p1[1], wt * 0.7)
+        rg.add_color_stop_rgba(0, *style.skin_shade, 0.0)
+        rg.add_color_stop_rgba(0.6, *style.skin_shade, 0.35 * press)
+        rg.add_color_stop_rgba(1, *style.skin_shade, 0.0)
+        ctx.set_source(rg)
+        ctx.arc(p1[0], p1[1], wt * 0.7, 0, 2 * math.pi)
+        ctx.fill()
 
 
 def hand_silhouette(ctx, geo: HandGeometry):
-    """Union of all hand parts as separate filled sub-paths (for shadows)."""
-    _thumb_shape(ctx, geo)
-    ctx.fill()
+    for f in range(1, 6):
+        js, ws, press = geo.fingers[f]
+        _finger_outline(ctx, js, ws, geo.W, wrist=geo.base_dir(f))
+        ctx.fill()
     _catmull(ctx, geo.palm)
     ctx.fill()
-    for f in (2, 3, 4, 5):
-        k, tip, wb, press = geo.fingers[f]
-        HandGeometry.finger_path(ctx, k, tip, wb, press, geo.W)
-        ctx.fill()
 
 
 def draw_hand(ctx, geo: HandGeometry, style: HandStyle):
     W = geo.W
     ow = style.outline_w * max(1.0, W / 45)
-    # 1) thick outline of every part (only the outer silhouette survives step 2)
+    ctx.set_line_join(cairo.LINE_JOIN_ROUND)
+    ctx.set_line_cap(cairo.LINE_CAP_ROUND)
+    # 1) outer outline of the whole hand (inner parts get covered by the fills)
     ctx.set_source_rgb(*style.outline)
     ctx.set_line_width(ow * 2)
-    ctx.set_line_join(cairo.LINE_JOIN_ROUND)
-    _thumb_shape(ctx, geo)
-    ctx.stroke()
+    for f in range(1, 6):
+        js, ws, press = geo.fingers[f]
+        _finger_outline(ctx, js, ws, W, wrist=geo.base_dir(f))
+        ctx.stroke()
     _catmull(ctx, geo.palm)
     ctx.stroke()
-    for f in (2, 3, 4, 5):
-        k, tip, wb, press = geo.fingers[f]
-        HandGeometry.finger_path(ctx, k, tip, wb, press, W)
+    # 2) fingers, far side first, each with a thin outline so neighbours stay separate
+    order = [1, 5, 4, 3, 2]
+    for f in order:
+        js, ws, press = geo.fingers[f]
+        _fill_finger(ctx, js, ws, press, W, style, wrist=geo.base_dir(f))
+        _finger_outline(ctx, js, ws, W, wrist=geo.base_dir(f))
+        ctx.set_source_rgb(*style.outline)
+        ctx.set_line_width(ow)
         ctx.stroke()
-    # 2) fills: thumb, palm, fingers
-    j, twt = _thumb_shape(ctx, geo)
-    base, ttip, twb, tpress = geo.thumb
-    v = (ttip[0] - j[0], ttip[1] - j[1])
-    L = math.hypot(*v) or 1.0
-    n = (-v[1] / L, v[0] / L)
-    g = cairo.LinearGradient(ttip[0] + n[0] * twt, ttip[1] + n[1] * twt, ttip[0] - n[0] * twt, ttip[1] - n[1] * twt)
-    g.add_color_stop_rgb(0.0, *style.skin_shade)
-    g.add_color_stop_rgb(0.4, *style.skin)
-    g.add_color_stop_rgb(0.6, *style.skin_light)
-    g.add_color_stop_rgb(1.0, *style.skin_shade)
-    ctx.set_source(g)
-    ctx.fill()
-    cx = sum(p[0] for p in geo.palm[:6]) / 6
-    cy = geo.st.palm_y + 1.4 * W
-    rg = cairo.RadialGradient(cx - geo.s * 0.2 * W, cy - 0.6 * W, 0.3 * W, cx, cy, 3.4 * W)
+        if f == 1:   # the thumb can tuck under the fingers: its details go before theirs
+            _finger_details(ctx, js, ws, press, W, style, thumb=True)
+    # 3) back of the hand over the finger bases
+    pc = geo.fp(0.15, 1.3)
+    rg = cairo.RadialGradient(pc[0] - geo.s * 0.4 * W, pc[1] - 0.7 * W, 0.4 * W, pc[0], pc[1], 3.6 * W)
     rg.add_color_stop_rgb(0.0, *style.skin_light)
-    rg.add_color_stop_rgb(0.55, *style.skin)
+    rg.add_color_stop_rgb(0.5, *style.skin)
     rg.add_color_stop_rgb(1.0, *style.skin_shade)
     _catmull(ctx, geo.palm)
     ctx.set_source(rg)
     ctx.fill()
-    # thumb line where it meets the palm
     ctx.save()
     _catmull(ctx, geo.palm)
     ctx.clip()
-    ctx.set_source_rgba(*style.crease, 0.35)
-    ctx.set_line_width(max(1.2, W * 0.04))
-    bx, by = base
-    ctx.move_to(bx + geo.s * 0.25 * W, by + 1.6 * W)
-    ctx.curve_to(bx + geo.s * 0.55 * W, by + 0.6 * W, bx + geo.s * 0.35 * W, by - 0.4 * W, j[0] + geo.s * 0.55 * W, j[1] - 0.1 * W)
-    ctx.stroke()
-    ctx.restore()
-    order = (5, 4, 3, 2)
-    for f in order:
-        k, tip, wb, press = geo.fingers[f]
-        d, nn, Lf, wt = _fill_finger(ctx, k, tip, wb, press, W, style)
-        ctx.fill()
-        # separation outline above the knuckle line
-        ctx.save()
-        ctx.rectangle(0, 0, 100000, k[1] - 0.18 * W)
-        ctx.clip()
-        HandGeometry.finger_path(ctx, k, tip, wb, press, W)
-        ctx.set_source_rgb(*style.outline)
-        ctx.set_line_width(ow)
-        ctx.stroke()
-        ctx.restore()
-    # knuckle highlights
+    # knuckle bumps: highlight on top, soft shade just behind
     for f in (2, 3, 4, 5):
-        k = geo.fingers[f][0]
+        k = geo.fingers[f][0][0]
+        w = geo.fingers[f][1][0]
         ctx.save()
-        ctx.translate(k[0], k[1] + 0.05 * W)
-        ctx.scale(0.20 * W, 0.12 * W)
+        ctx.translate(k[0], k[1] + 0.32 * W)
+        ctx.scale(w * 0.55, w * 0.32)
+        ctx.arc(0, 0, 1, 0, 2 * math.pi)
+        ctx.restore()
+        ctx.set_source_rgba(*style.skin_shade, 0.16)
+        ctx.fill()
+        ctx.save()
+        ctx.translate(k[0] - geo.s * 0.04 * W, k[1] + 0.05 * W)
+        ctx.scale(w * 0.34, w * 0.20)
         ctx.arc(0, 0, 1, 0, 2 * math.pi)
         ctx.restore()
         ctx.set_source_rgba(1, 1, 1, 0.22)
         ctx.fill()
-    # pressing fingertips read slightly darker (weight on the key)
-    for k_, tip_, wb_, pr_ in [geo.fingers[f] for f in (2, 3, 4, 5)] + [geo.thumb]:
-        if pr_ > 0.01:
-            rg2 = cairo.RadialGradient(tip_[0], tip_[1], 0, tip_[0], tip_[1], wb_ * 0.75)
-            rg2.add_color_stop_rgba(0, *style.skin_shade, 0.0)
-            rg2.add_color_stop_rgba(0.55, *style.skin_shade, 0.42 * pr_)
-            rg2.add_color_stop_rgba(1, *style.skin_shade, 0.0)
-            ctx.set_source(rg2)
-            ctx.arc(tip_[0], tip_[1], wb_ * 0.75, 0, 2 * math.pi)
-            ctx.fill()
-    # 3) details
-    _finger_details(ctx, j, ttip, twt, tpress, W, style)
-    for f in (2, 3, 4, 5):
-        k, tip, wb, press = geo.fingers[f]
-        _finger_details(ctx, k, tip, wb * (0.86 + 0.04 * press), press, W, style)
+    # crease where the thumb joins the hand
+    c0, c1, c2 = geo.fp(-1.18, 1.05), geo.fp(-1.02, 1.55), geo.fp(-1.12, 2.15)
+    ctx.move_to(*c0)
+    ctx.curve_to(c1[0], c1[1], c1[0], c1[1], c2[0], c2[1])
+    ctx.set_source_rgba(*style.crease, 0.28)
+    ctx.set_line_width(max(1.0, W * 0.03))
+    ctx.stroke()
+    ctx.restore()
+    # 4) details on the fingers (the thumb's were drawn with it)
+    for f in order[1:]:
+        js, ws, press = geo.fingers[f]
+        _finger_details(ctx, js, ws, press, W, style)
 
 
 def draw_hand_shadow(ctx, geo: HandGeometry, style: HandStyle, canvas_w: int, canvas_h: int):
     """Blurred drop shadow, rendered in a cropped A8 buffer."""
     W = geo.W
-    xs = [p[0] for p in geo.palm] + [geo.fingers[f][1][0] for f in (2, 3, 4, 5)] + [geo.thumb[1][0]]
-    ys = [p[1] for p in geo.palm] + [geo.fingers[f][1][1] for f in (2, 3, 4, 5)] + [geo.thumb[1][1]]
+    xs = [p[0] for p in geo.palm] + [j[0] for f in geo.fingers.values() for j in f[0]]
+    ys = [p[1] for p in geo.palm] + [j[1] for f in geo.fingers.values() for j in f[0]]
     pad = int(W * 1.2)
     x0, y0 = int(max(0, min(xs) - pad)), int(max(0, min(ys) - pad))
     x1, y1 = int(min(canvas_w, max(xs) + pad)), int(min(canvas_h, max(ys) + pad))
@@ -613,10 +727,9 @@ def draw_hand_shadow(ctx, geo: HandGeometry, style: HandStyle, canvas_w: int, ca
     surf.flush()
     stride = surf.get_stride()
     a = np.ndarray((h, stride), np.uint8, surf.get_data())
-    blur = cv2.GaussianBlur(a[:, :w], (0, 0), sigmaX=W * 0.16)
-    a[:, :w] = blur
+    a[:, :w] = cv2.GaussianBlur(a[:, :w], (0, 0), sigmaX=W * 0.18)
     surf.mark_dirty()
     ctx.save()
     ctx.set_source_rgba(0.12, 0.08, 0.06, style.shadow_alpha)
-    ctx.mask_surface(surf, x0 + 0.10 * W, y0 + 0.24 * W)
+    ctx.mask_surface(surf, x0 + 0.12 * W, y0 + 0.30 * W)
     ctx.restore()

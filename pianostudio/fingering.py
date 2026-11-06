@@ -24,6 +24,8 @@ from .model import Note, Song, LEFT, RIGHT
 NATURAL = {1: -2.05, 2: -1.0, 3: 0.0, 4: 1.0, 5: 2.0}   # in white-key widths (RH)
 TOLERANCE = {1: 2.4, 2: 1.0, 3: 0.9, 4: 0.8, 5: 1.1}    # comfortable deviation (white widths)
 DIFFICULT_COST = 14.0
+RECENT = 0.35            # s: a just-released finger still constrains crossings
+CROSS_RECENT_COST = 9.0
 IMPOSSIBLE_COST = 40.0
 
 
@@ -129,7 +131,10 @@ def finger_hand(notes: list[Note], hand: str, beam_width: int = 16) -> list[Fing
             groups[gi] = g
         cand: dict = {}
         for b in beams:
-            held = tuple(h for h in b.active if h[0] > onset + 0.04 and h[1] not in [n.pitch for n in g])
+            pitches = [n.pitch for n in g]
+            held = tuple(h for h in b.active if h[0] > onset + 0.04 and h[1] not in pitches)
+            # fingers that are still down or only just lifted: crossing over/under them is unnatural
+            recent = tuple(h for h in b.active if onset - RECENT <= h[0] <= onset + 0.04 and h[1] not in pitches)
             last = b.choices[-1] if b.choices else None
             last_g = groups[gi - 1] if gi > 0 else None
             gap = (onset - last_g[0].start) if last_g else 1.0
@@ -141,6 +146,16 @@ def finger_hand(notes: list[Note], hand: str, beam_width: int = 16) -> list[Fing
                 for f in st:
                     if f in held_f:
                         c += 25.0
+                # non-thumb finger crossings against fingers still on / just off their keys
+                for n, f in zip(g, st):
+                    if f == 1:
+                        continue
+                    for h in held + recent:
+                        pf = h[2]
+                        if pf == 1 or pf == f:
+                            continue
+                        if (f - pf) * s * (key_x(n.pitch) - h[3]) < 0:
+                            c += CROSS_RECENT_COST
                 # black keys
                 for n, f in zip(g, st):
                     if is_black(n.pitch):
@@ -174,7 +189,7 @@ def finger_hand(notes: list[Note], hand: str, beam_width: int = 16) -> list[Fing
                 key_ = (st, tuple(sorted((h[2], h[1]) for h in held)))
                 total = b.cost + c
                 if key_ not in cand or cand[key_].cost > total:
-                    new_active = held + tuple((n.end, n.pitch, f, x) for n, f, x in zip(g, st, xs))
+                    new_active = held + recent + tuple((n.end, n.pitch, f, x) for n, f, x in zip(g, st, xs))
                     cand[key_] = _Beam(total, b.choices + [st], new_active, b.local + [(c, P, imp)])
         beams = sorted(cand.values(), key=lambda b: b.cost)[:beam_width]
     if not beams or not groups:

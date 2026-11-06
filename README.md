@@ -114,6 +114,22 @@ Procedural scenes (`pianostudio/reel/scenes.py`, all original): `field` (golden-
 `palette: "dusk"` cornfield; camera `dolly` / `pan` / `rise`), `truck`, `storm`, `night`,
 `launch` (`phase`: `pad` / `liftoff` / `ascent`), `orbit`, `planet`, `blackhole`.
 
+### How the hands move
+
+* **Jointed fingers.** Each finger has three phalanges in adult proportions (the thumb
+  has two), and the knuckles sit about 4 cm above the keys. Every frame, inverse
+  kinematics bends each finger down to its target, and the overhead view shows the
+  curl as foreshortening. A resting finger curls in, and a finger reaching a black key
+  straightens instead of stretching.
+* **The whole hand travels.** Each frame, the palm's position, rotation and finger
+  spread are fitted to the keys the hand is about to play, is playing, or just played.
+  Fingers stay roughly parallel instead of fanning out from a fixed palm. In wide
+  stretches (octaves), the thumb and pinky reach while the middle fingers stay curled
+  in the centre.
+* **Pianist habits.** Before a leap or a stretch beyond the comfortable span, a
+  finger lets go early so the hand can move (the pedal holds the sound). The
+  automatic fingering avoids crossing a finger over one that is still on its key.
+
 ### How sync is guaranteed
 
 * Notes, keys, hands and audio use the same timeline. A falling note's bottom edge
